@@ -1,0 +1,54 @@
+# ── 私有目录：不进版本库 ─────────────────────────────
+/private/
+
+# ── 系统目录 ────────────────────────────────────────
+/.rivet/
+
+# ── 构建产物 ────────────────────────────────────────
+target/
+build/
+out/
+bin/
+*.class
+*.jar
+*.war
+*.ear
+
+# ── 依赖 ────────────────────────────────────────────
+node_modules/
+dist/
+.npm/
+.yarn/
+
+# ── 环境变量、密钥与本地配置（重要：绝不提交）────────
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+application-local.yml
+application-local.yaml
+application-prod.yml
+application-prod.yaml
+*-secret.yml
+
+# ── 日志 ────────────────────────────────────────────
+logs/
+*.log
+
+# ── IDE / 编辑器 ────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.swp
+
+# ── 系统文件 ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── 部署产物（可能含地址或凭据）─────────────────────
+deploy-output/
