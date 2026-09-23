@@ -115,9 +115,13 @@
         </executions>
       </plugin>
 
-      <!-- 许可证头自动注入。手改 21 个文件既低效又容易漏，交给插件。
-           一次性执行：mvn license:update-file-header
-           守住新文件：mvn license:check（可挂进 CI，让"新文件缺头"变成一个失败而不是被忽略）
+      <!-- 许可证头自动注入。手改几十个文件既低效又容易漏，交给插件。
+           一次性执行：mvn license:format
+           守住新文件：mvn license:check（可挂进 CI，让"新文件缺头"变成一个失败而非被忽略）
+
+           ⚠️ goal 名随版本变过：v4 是 update-file-header，v5 改成了 format
+              （v5 可用 goal 只有 check / format / remove）。照抄旧文档会报
+              "Could not find goal"。本仓已验证：5.1.2 下用 format。
 
            header 用 ${maven.multiModuleProjectDirectory} 定位——写成 ${project.basedir}
            的话每个模块会去找自己目录下的同名文件，结果是全部找不到。 -->
@@ -132,6 +136,9 @@
           </includes>
           <excludes>
             <exclude>**/target/**</exclude>
+            <!-- .rivet/ 是开发工具的备份目录，不是源码。
+                 少了这条，license:format 会把头写进备份文件里（实测发生过）。 -->
+            <exclude>**/.rivet/**</exclude>
           </excludes>
           <properties>
             <year>2026</year>
