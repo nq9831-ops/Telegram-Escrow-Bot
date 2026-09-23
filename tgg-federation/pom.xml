@@ -19,5 +19,22 @@
       <groupId>com.tg.escrow</groupId>
       <artifactId>tgg-common</artifactId>
     </dependency>
+
+    <!-- 为什么需要 BouncyCastle：JDK 内置 Ed25519 支持只在 KeyPairGenerator 层面
+         （生成随机的），不提供「从 32 字节 seed 派生公钥」。而本模块要求密钥可确定性
+         恢复——配置里只存一个 seed，公钥由它算出，避免「私钥与公钥配置不一致」这类
+         在验签时才暴露的故障。BC 的 Ed25519PrivateKeyParameters.generatePublicKey()
+         补上了这一点。 -->
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcprov-jdk18on</artifactId>
+      <version>1.86</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 </project>
