@@ -15,15 +15,16 @@
   <description>担保交易：订单状态机 / 裁决多签规则 / 资金流水账。</description>
 
   <dependencies>
-    <!-- 依赖方向单向：escrow 依赖 core 与 federation，反之不成立（否则成环）。
-         core 提供命令/权限/群配置契约；federation 提供裁决所需的节点签名契约。 -->
+    <!-- 依赖方向单向：escrow 依赖 federation，反之不成立（否则成环）。
+         federation 提供裁决所需的节点签名契约（FederationKeyPair 由
+         FederationPartySignatureVerifier 消费）。
+
+         刻意【不】依赖 tgg-core：escrow 目前不需要群管理的任何契约，而悬空依赖有真实成本
+         ——传递依赖膨胀、构建顺序耦合、以及误导读者以为二者已经耦合。
+         将来接线（Bot 层把命令与权限串起来）时若确实需要，再加不迟。 -->
     <dependency>
       <groupId>com.tg.escrow</groupId>
       <artifactId>tgg-common</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>com.tg.escrow</groupId>
-      <artifactId>tgg-core</artifactId>
     </dependency>
     <dependency>
       <groupId>com.tg.escrow</groupId>
