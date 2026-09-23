@@ -1,0 +1,86 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <!-- 刻意停在 3.5.16，不要升 4.x：
+         Boot 4.x 使用 Jackson 3（tools.jackson），而 TelegramBots 10.3.0 使用
+         Jackson 2 注解（com.fasterxml.jackson.annotation），二者不兼容。
+         症状是【静默失效】——Update 反序列化失败（no Creators），请求被异常处理器
+         吞成 200 空响应、handler 永不执行。排查成本极高，故版本锁死并记录在此。 -->
+    <version>3.5.16</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.tg.escrow</groupId>
+  <artifactId>telegram-escrow-bot</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>jar</packaging>
+
+  <name>telegram-escrow-bot</name>
+  <description>Telegram 群管理 + 担保交易工具包（开源 / AGPL-3.0）</description>
+
+  <licenses>
+    <license>
+      <name>GNU Affero General Public License v3.0</name>
+      <url>https://www.gnu.org/licenses/agpl-3.0.html</url>
+      <distribution>repo</distribution>
+    </license>
+  </licenses>
+
+  <properties>
+    <java.version>21</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <!-- 担保订单账本持久化。明细实体用 JPA 映射，表结构由 Flyway 管理
+         （ddl-auto: validate —— 让数据库结构成为唯一事实来源，实体不许自行建表）。 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-mysql</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- 默认 surefire 只跑 *Test；集成测试（*IT）须由 failsafe 在 verify 阶段执行。
+           没有它，任何 *IT 会被【静默跳过】——BUILD SUCCESS 并不代表端到端跑过。 -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-failsafe-plugin</artifactId>
+        <executions>
+          <execution>
+            <goals>
+              <goal>integration-test</goal>
+              <goal>verify</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>
