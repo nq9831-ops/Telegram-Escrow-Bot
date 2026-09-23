@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.tg.escrow</groupId>
+    <artifactId>telegram-escrow-bot</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>tgg-federation</artifactId>
+  <name>tgg-federation</name>
+  <description>联邦仲裁与节点签名。escrow 的裁决签名（必含联邦）依赖本模块提供的节点密钥契约。（待实现）</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-common</artifactId>
+    </dependency>
+  </dependencies>
+</project>

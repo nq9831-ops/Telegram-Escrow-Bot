@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.tg.escrow</groupId>
+    <artifactId>telegram-escrow-bot</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>tgg-app</artifactId>
+  <name>tgg-app</name>
+  <description>应用装配与启动。唯一产出可执行 jar 的模块。</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-federation</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-escrow</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-chain</artifactId>
+    </dependency>
+
+    <!-- 启动上下文所需：@SpringBootApplication 的自动装配与内嵌容器 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- 只有本模块打可执行 jar；其余模块是普通库 jar。 -->
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <mainClass>com.tg.escrow.EscrowBotApplication</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

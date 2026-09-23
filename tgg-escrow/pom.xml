@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.tg.escrow</groupId>
+    <artifactId>telegram-escrow-bot</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>tgg-escrow</artifactId>
+  <name>tgg-escrow</name>
+  <description>担保交易：订单状态机 / 裁决多签规则 / 资金流水账。</description>
+
+  <dependencies>
+    <!-- 依赖方向单向：escrow 依赖 core 与 federation，反之不成立（否则成环）。
+         core 提供命令/权限/群配置契约；federation 提供裁决所需的节点签名契约。 -->
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-common</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-federation</artifactId>
+    </dependency>
+
+    <!-- 订单账本持久化：表结构由 Flyway 管理，JPA 侧 ddl-auto=validate -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-jpa</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>org.flywaydb</groupId>
+      <artifactId>flyway-mysql</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

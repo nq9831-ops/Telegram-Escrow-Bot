@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.tg.escrow</groupId>
+    <artifactId>telegram-escrow-bot</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>tgg-chain</artifactId>
+  <name>tgg-chain</name>
+  <description>链上部分：TON 合约与链上事件接入（新增模块，待实现）。
+    合约侧状态刻意少于应用层——合约只管资金（UNFUNDED / FUNDED / SETTLED_*），
+    流程（维护期、投票、争议）留在应用层，使合约攻击面最小且流程改动不需重新部署。</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-common</artifactId>
+    </dependency>
+  </dependencies>
+</project>
