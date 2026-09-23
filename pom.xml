@@ -114,6 +114,30 @@
           </execution>
         </executions>
       </plugin>
+
+      <!-- 许可证头自动注入。手改 21 个文件既低效又容易漏，交给插件。
+           一次性执行：mvn license:update-file-header
+           守住新文件：mvn license:check（可挂进 CI，让"新文件缺头"变成一个失败而不是被忽略）
+
+           header 用 ${maven.multiModuleProjectDirectory} 定位——写成 ${project.basedir}
+           的话每个模块会去找自己目录下的同名文件，结果是全部找不到。 -->
+      <plugin>
+        <groupId>com.mycila</groupId>
+        <artifactId>license-maven-plugin</artifactId>
+        <version>5.1.2</version>
+        <configuration>
+          <header>${maven.multiModuleProjectDirectory}/LICENSE-HEADER.txt</header>
+          <includes>
+            <include>**/*.java</include>
+          </includes>
+          <excludes>
+            <exclude>**/target/**</exclude>
+          </excludes>
+          <properties>
+            <year>2026</year>
+          </properties>
+        </configuration>
+      </plugin>
     </plugins>
   </build>
 </project>
