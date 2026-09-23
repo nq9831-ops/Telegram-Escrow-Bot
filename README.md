@@ -51,7 +51,7 @@
 | 组件 | 选型 | 用途 |
 |---|---|---|
 | 语言 | Java 21 LTS | 虚拟线程 |
-| 框架 | Spring Boot 3.2+ | 自动装配 |
+| 框架 | Spring Boot 3.5.16（**刻意锁定，勿升 4.x**） | 自动装配——Boot 4.x 用 Jackson 3，与 TelegramBots 10.3.0 的 Jackson 2 注解不兼容，症状是 Update 反序列化**静默失败**；理由详见 `pom.xml` 注释 |
 | Bot 框架 | TelegramBots | 机器人接入 |
 | 数据库 | MySQL 8.0 | 持久化 |
 | 缓存 | Redis 7.0 | 限流窗口 / 状态 / 投票 |

@@ -33,6 +33,21 @@
   </licenses>
 
   <properties>
+    <!-- 21 而非 25：本机工具链是 JDK 21，把它设成 25 会让 javac 报
+         「不支持发行版本 25」并在编译期直接失败——而那不是框架问题，
+         是环境问题。Spring Boot 3.5.5+ 本身是 Java 25 ready
+         （spring-projects/spring-boot#47245），所以升级路径是通的，
+         前置条件是【先装 JDK 25】，而不是只改这一行。
+
+         ⚠️ 本行曾被自动化工具（appmod/java-upgrade 分支）改为 25 而未装 JDK，
+            导致全仓编译失败。改它之前请先确认 `java -version` 已是 25。
+
+         ⚠️ 另一个更隐蔽的坑：改回本行之后【必须 mvn clean】。曾用 25 编出的 .class
+            （class 版本 major 69）会被增量编译保留下来，而 JDK 21 读不了它——
+            症状是【下游模块报「无法访问 com.tg.escrow.common.TggException」或
+            「找不到符号: 类 TggException」】，看起来像依赖坏了或源码丢了，
+            实际是 target/ 里躺着跨版本的陈旧产物。用 `od -An -t u1 -j 6 -N 2 <class>`
+            可查版本号：65=JDK21，69=JDK25。 -->
     <java.version>21</java.version>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
   </properties>
