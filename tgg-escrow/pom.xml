@@ -55,5 +55,14 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+
+    <!-- H2 只在测试期使用，跑真实 JPA 映射与 Flyway 迁移。
+         不 mock 的理由：本层的错误形态是「列名对不上 / 类型不匹配 / 迁移没跑」，
+         mock 全测不出来，只会在生产启动时炸。用 MySQL 兼容模式贴近生产方言。 -->
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>test</scope>
+    </dependency>
   </dependencies>
 </project>
