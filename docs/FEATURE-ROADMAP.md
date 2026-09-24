@@ -25,8 +25,12 @@
 | — | 持久化地基 | `EscrowOrderRepository` / `JpaEscrowOrderStore` / `JpaTradeHistoryPort` / `V1__init_escrow.sql` |
 | G7/G9/G10/G26/G23 | 波次 G-A 内容安全与限流 | `MessageRepeatDetector` / `LinkFilter` / `MediaFilter` / `SlidingWindowCounter` / `RateLimiter`（提交 `8046ed7`，tgg-core 71→107） |
 | T2/T13/T27/T14/T28/T18/T26/T38 | 波次 T-A 交易流程深度 | `TradeStatusView` / `TradeTimeoutPolicy` / `DisputeFlow` / `TradeReview` / `MaintenanceWindow` / `TradeStage`（提交 `b4ec90f`，tgg-escrow 97→128） |
+| G11/G12/G13/G14/G15/G19/G27 | 波次 G-B 入群与配置 | `WelcomeTemplate` / `JoinVerificationFlow` / `FeatureToggle` / `AdminRegistry` / `SilenceWindow` / `ProtectionMode`（提交 `c4d6ca0`，tgg-core 107→152） |
+| S2 | 命令层接线 | `TradeCommandHandler`（提交 `eacc780`，tgg-app 0→8） |
 
-> 波次 **G-A** 与 **T-A** 已完成（灾后重放，`mvn test` 全绿 193→260）。另修复 `MessageRepeatDetector` 内容 key 无界增长、`RateLimiter` 跨层计数波及全群两处缺陷。第 2、3 节中这些条目已落地，续跑请跳过。
+> 波次 **G-A** / **T-A** / **G-B** / **S2** 已完成（`mvn test` 全绿 193→313）。另修复 `MessageRepeatDetector` 内容 key 无界增长、`RateLimiter` 跨层计数波及全群两处缺陷。第 2、3 节中这些条目已落地，续跑请跳过。
+>
+> **Wave 1b（T-B 群聊投票）/ 1c（V2.0 新增纯逻辑）及后续波次已按用户指令暂停**，待用户后续文档与指示。
 
 ---
 
