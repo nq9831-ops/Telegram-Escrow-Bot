@@ -27,4 +27,9 @@ public class EscrowPersistenceTestConfig {
     public TradeHistoryPort tradeHistoryPort(EscrowOrderRepository repository) {
         return new JpaTradeHistoryPort(repository);
     }
+
+    @Bean
+    public TradeInviteStore tradeInviteStore(TradeInviteRepository repository) {
+        return new JpaTradeInviteStore(repository);
+    }
 }
