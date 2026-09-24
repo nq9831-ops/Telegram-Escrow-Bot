@@ -98,6 +98,10 @@ class TradeCommandHandlerTest {
         return new BotCommand("escrow", List.of("status", orderId));
     }
 
+    private static BotCommand cancelCmd(String orderId) {
+        return new BotCommand("escrow", List.of("cancel", orderId));
+    }
+
     /** 用真实 gate + 真实 service + 真实 registry 装配 handler。ctx 决定门禁看到的事实。 */
     private static TradeCommandHandler handler(int maxConcurrent, Duration cooldown,
                                                TradeAdmissionContext ctx) {
@@ -278,5 +282,41 @@ class TradeCommandHandlerTest {
 
         assertThat(h.handle(new BotCommand("escrow", List.of("status")), ACTOR)).contains("用法");
         assertThat(h.handle(statusCmd("abc"), ACTOR)).contains("用法");
+    }
+
+    @Test
+    @DisplayName("cancel：当事人取消未推进的订单 → 回已取消，且状态确实变了")
+    void cancelOwnOrder() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        h.handle(createCmd("2002", "100", "USDT"), ACTOR);
+        h.handle(confirmCmd("2002", "100", "USDT"), ACTOR);   // 落单 #1（OPEN）
+
+        String out = h.handle(cancelCmd("1"), ACTOR);
+
+        assertThat(out).contains("已取消");
+        // 关键：不是只有回执变了——状态真落库（否则回执就是谎报）
+        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("已取消");
+    }
+
+    @Test
+    @DisplayName("cancel：非当事人 → 拒绝（防越权取消他人订单），且状态不变")
+    void cancelOthersOrderRejected() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        h.handle(createCmd("2002", "100", "USDT"), ACTOR);
+        h.handle(confirmCmd("2002", "100", "USDT"), ACTOR);
+        CommandActor stranger = new CommandActor(9999L, MemberRole.MEMBER);
+
+        String out = h.handle(cancelCmd("1"), stranger);
+
+        assertThat(out).contains("无权");
+        assertThat(h.handle(statusCmd("1"), ACTOR)).doesNotContain("已取消");
+    }
+
+    @Test
+    @DisplayName("cancel：订单不存在 → 明说找不到")
+    void cancelUnknownOrder() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+
+        assertThat(h.handle(cancelCmd("999"), ACTOR)).contains("不存在");
     }
 }

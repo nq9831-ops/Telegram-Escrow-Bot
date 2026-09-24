@@ -90,4 +90,27 @@ public final class EscrowTradeService {
                 request.amount(), request.currency(), now);
         return TradeInitiationResult.created(orderStore.save(order), decision);
     }
+
+    /**
+     * 取消订单（当事人自助撤销）。
+     *
+     * <p><b>权限守卫在服务层</b>：只有买方或卖方可取消，非当事人一律拒绝——命令层不该是
+     * 唯一的权限防线。状态合法性交给 {@link EscrowOrder#markCancelled}（只允许 OPEN/CONFIRMED，
+     * 资金已锁仓后必须走争议/退款路径，不能靠"取消"绕过）。
+     *
+     * @param order   已查出的订单
+     * @param actorId 发起取消的用户
+     * @return 已保存的订单
+     * @throws EscrowException 非当事人、或订单当前状态不允许取消
+     */
+    public EscrowOrder cancel(EscrowOrder order, long actorId) {
+        if (order == null) {
+            throw new EscrowException("交易取消：未提供订单");
+        }
+        if (order.getBuyerUserId() != actorId && order.getSellerUserId() != actorId) {
+            throw new EscrowException("无权操作该订单");
+        }
+        order.markCancelled("当事人取消", clock.instant());
+        return orderStore.save(order);
+    }
 }

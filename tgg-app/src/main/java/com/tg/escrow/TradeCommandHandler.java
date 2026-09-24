@@ -64,9 +64,11 @@ public final class TradeCommandHandler {
     private static final String SUB_CREATE = "create";
     private static final String SUB_CONFIRM = "confirm";
     private static final String SUB_STATUS = "status";
+    private static final String SUB_CANCEL = "cancel";
     private static final String USAGE = "用法：/escrow create <卖方ID> <金额> <币种> 预览风险；"
             + "确认后发 /escrow confirm <卖方ID> <金额> <币种> 创建交易；"
-            + "/escrow status <订单号> 查询订单状态";
+            + "/escrow status <订单号> 查询订单状态；"
+            + "/escrow cancel <订单号> 取消订单（仅当事人，且资金未锁仓时）";
 
     private final EscrowTradeService service;
     private final AmountTierPolicy tierPolicy;
@@ -107,9 +109,12 @@ public final class TradeCommandHandler {
 
         String sub = cmd.argOpt(0).orElse(null);
 
-        // T2 状态查询：只吃订单号，不走 create/confirm 那套买卖双方的参数解析
+        // T2 状态查询 / 取消：都只吃订单号，不走 create/confirm 那套买卖双方的参数解析
         if (SUB_STATUS.equals(sub)) {
             return handleStatus(cmd);
+        }
+        if (SUB_CANCEL.equals(sub)) {
+            return handleCancel(cmd, actor);
         }
 
         if (!SUB_CREATE.equals(sub) && !SUB_CONFIRM.equals(sub)) {
@@ -181,6 +186,30 @@ public final class TradeCommandHandler {
                 .map(view -> "订单 #" + orderId + "：" + view.summary()
                         + "\n下一步：" + view.nextStep())
                 .orElse("订单 #" + orderId + " 不存在（请核对订单号）");
+    }
+
+    /**
+     * 取消订单：查单 → 交服务层做权限与状态校验 → 落库。
+     *
+     * <p>权限与状态守卫都在服务层（{@link EscrowTradeService#cancel}）——命令层只把
+     * 「订单不存在」「无权」「状态不允许」翻译成用户能懂的文案，不做第二套判定，
+     * 免得两处规则漂移。
+     */
+    private String handleCancel(BotCommand cmd, CommandActor actor) {
+        Long orderId = parseLong(cmd.argOpt(1).orElse(null));
+        if (orderId == null) {
+            return USAGE;
+        }
+        EscrowOrder order = lookup.byId(orderId).orElse(null);
+        if (order == null) {
+            return "订单 #" + orderId + " 不存在（请核对订单号）";
+        }
+        try {
+            service.cancel(order, actor.userId());
+        } catch (EscrowException ex) {
+            return "无法取消：" + ex.getMessage();
+        }
+        return "订单 #" + orderId + " 已取消";
     }
 
     private static String reasonText(TradeAdmissionDecision.Reason reason) {
