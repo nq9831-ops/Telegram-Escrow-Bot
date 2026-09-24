@@ -454,4 +454,146 @@ class TradeCommandHandlerTest {
 
         assertThat(h.handle(new BotCommand("escrow", List.of("invite")), ACTOR)).contains("invite");
     }
+
+    // ── 生命周期命令（Wave 2 接线）────────────────────────────────────────
+
+    private static final long SELLER = 2002L;
+    private static final CommandActor SELLER_ACTOR = new CommandActor(SELLER, MemberRole.MEMBER);
+
+    private static BotCommand lockCmd(String orderId) {
+        return new BotCommand("escrow", List.of("lock", orderId));
+    }
+
+    private static BotCommand deliverCmd(String orderId) {
+        return new BotCommand("escrow", List.of("deliver", orderId));
+    }
+
+    private static BotCommand releaseCmd(String orderId) {
+        return new BotCommand("escrow", List.of("release", orderId));
+    }
+
+    private static BotCommand refundCmd(String orderId) {
+        return new BotCommand("escrow", List.of("refund", orderId, "协商退款"));
+    }
+
+    private static BotCommand disputeCmd(String orderId) {
+        return new BotCommand("escrow", List.of("dispute", orderId, "未收到货"));
+    }
+
+    /** 落一笔 OPEN 订单（走真实 create → confirm 两步流），返回订单号 1。 */
+    private static void placeOpenOrder(TradeCommandHandler h) {
+        h.handle(createCmd("2002", "100", "USDT"), ACTOR);
+        h.handle(confirmCmd("2002", "100", "USDT"), ACTOR);
+    }
+
+    @Test
+    @DisplayName("lock：买方托管登记 → 状态真变，且回执显式声明「链上未接入」")
+    void lockAdvancesAndDeclaresChainGap() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+
+        String out = h.handle(lockCmd("1"), ACTOR);
+
+        assertThat(out).contains("已锁仓");
+        assertThat(out)
+                .as("资金类回执必须声明链上未接入——否则等于把状态登记谎报成真实资金动作")
+                .contains("链上");
+        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("资金已托管");
+    }
+
+    @Test
+    @DisplayName("lock：第三方发命令 → 无权，且状态不变")
+    void lockByStrangerRejected() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+
+        String out = h.handle(lockCmd("1"), SELLER_ACTOR);   // 卖方不是买方
+
+        assertThat(out).contains("无权");
+        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("等待卖方确认");
+    }
+
+    @Test
+    @DisplayName("deliver：卖方交付 → 推进到已交付")
+    void deliverAdvances() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+        h.handle(lockCmd("1"), ACTOR);
+
+        String out = h.handle(deliverCmd("1"), SELLER_ACTOR);
+
+        assertThat(out).contains("已交付");
+        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("卖方已交付");
+    }
+
+    @Test
+    @DisplayName("release：买方验收放款 → 终态，且回执声明「链上未接入」")
+    void releaseAdvancesAndDeclaresChainGap() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+        h.handle(lockCmd("1"), ACTOR);
+        h.handle(deliverCmd("1"), SELLER_ACTOR);
+
+        String out = h.handle(releaseCmd("1"), ACTOR);
+
+        assertThat(out).contains("已放款").contains("链上");
+        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("已放款给卖方");
+    }
+
+    @Test
+    @DisplayName("refund：任一方可发起协商退款 → 终态，且回执声明「链上未接入」")
+    void refundAdvancesAndDeclaresChainGap() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+        h.handle(lockCmd("1"), ACTOR);
+
+        String out = h.handle(refundCmd("1"), SELLER_ACTOR);
+
+        assertThat(out).contains("已退款").contains("链上");
+        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("已退款给买方");
+    }
+
+    @Test
+    @DisplayName("dispute：锁仓后可发起争议 → 争议态且记录理由")
+    void disputeAdvances() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+        h.handle(lockCmd("1"), ACTOR);
+
+        String out = h.handle(disputeCmd("1"), SELLER_ACTOR);
+
+        assertThat(out).contains("争议");
+        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("订单争议中");
+    }
+
+    @Test
+    @DisplayName("生命周期命令：订单号缺失/非数字 → 用法说明")
+    void lifecycleBadArgsReturnUsage() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+
+        assertThat(h.handle(new BotCommand("escrow", List.of("lock")), ACTOR)).contains("用法");
+        assertThat(h.handle(lockCmd("abc"), ACTOR)).contains("用法");
+        assertThat(h.handle(new BotCommand("escrow", List.of("dispute", "1")), ACTOR)).contains("用法");
+    }
+
+    @Test
+    @DisplayName("生命周期命令：订单不存在 → 明说找不到（不报错、不空响应）")
+    void lifecycleUnknownOrder() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+
+        assertThat(h.handle(lockCmd("999"), ACTOR)).contains("不存在");
+        assertThat(h.handle(deliverCmd("999"), SELLER_ACTOR)).contains("不存在");
+    }
+
+    @Test
+    @DisplayName("状态回执给出【真实可用】的下一步命令（不指挥用户发不存在的命令）")
+    void statusSuggestsRealCommand() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+        h.handle(lockCmd("1"), ACTOR);
+
+        String out = h.handle(statusCmd("1"), ACTOR);
+
+        assertThat(out).contains("/escrow deliver 1");
+    }
 }

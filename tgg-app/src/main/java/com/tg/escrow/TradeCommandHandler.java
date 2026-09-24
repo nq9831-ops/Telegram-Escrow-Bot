@@ -70,12 +70,32 @@ public final class TradeCommandHandler {
     private static final String SUB_CONFIRM = "confirm";
     private static final String SUB_STATUS = "status";
     private static final String SUB_CANCEL = "cancel";
+    private static final String SUB_LOCK = "lock";
+    private static final String SUB_DELIVER = "deliver";
+    private static final String SUB_RELEASE = "release";
+    private static final String SUB_REFUND = "refund";
+    private static final String SUB_DISPUTE = "dispute";
+
+    /**
+     * 资金类状态迁移的诚实标注（Wave 2）：链上托管尚未接入，平台当前只做流程状态登记。
+     *
+     * <p>刻意随回执一起发出、并由测试断言其存在——对用户说「资金已托管」而实际分文未动，
+     * 是会导致真实损失的谎报。等 S5 合约接入后，这里才是删除的时机。
+     */
+    public static final String CHAIN_CAVEAT =
+            "⚠️ 链上托管未接入（S5 合约）；当前仅为流程状态登记，不涉及真实转账。";
+
     /**
      * 用法说明文案（公开，供分发器判定"这条回执是用法说明"——从而在胶水层附上打开表单的按钮）。
      */
     public static final String USAGE = "用法：/escrow invite <金额> <币种> 生成邀请链接（对方点开即接单）；"
             + "/escrow create <卖方ID> <金额> <币种> 预览风险；"
             + "确认后发 /escrow confirm <卖方ID> <金额> <币种> 创建交易；"
+            + "/escrow lock <订单号> 买方托管登记；"
+            + "/escrow deliver <订单号> 卖方交付；"
+            + "/escrow release <订单号> 买方验收放款；"
+            + "/escrow refund <订单号> [理由] 退款；"
+            + "/escrow dispute <订单号> <理由> 发起争议；"
             + "/escrow status <订单号> 查询订单状态；"
             + "/escrow cancel <订单号> 取消订单（仅当事人，且资金未锁仓时）";
 
@@ -135,6 +155,27 @@ public final class TradeCommandHandler {
         }
         if (SUB_INVITE.equals(sub)) {
             return handleInvite(cmd, actor);
+        }
+
+        if (SUB_LOCK.equals(sub)) {
+            return advance(cmd, actor, order -> service.lock(order, actor.userId()), "托管", true);
+        }
+        if (SUB_DELIVER.equals(sub)) {
+            return advance(cmd, actor, order -> service.deliver(order, actor.userId()), "交付", false);
+        }
+        if (SUB_RELEASE.equals(sub)) {
+            return advance(cmd, actor, order -> service.release(order, actor.userId()), "验收放款", true);
+        }
+        if (SUB_REFUND.equals(sub)) {
+            String reason = cmd.argOpt(2).orElse("当事人协商退款");
+            return advance(cmd, actor, order -> service.refund(order, actor.userId(), reason), "退款", true);
+        }
+        if (SUB_DISPUTE.equals(sub)) {
+            String reason = cmd.argOpt(2).orElse(null);
+            if (reason == null || reason.isBlank()) {
+                return USAGE;
+            }
+            return advance(cmd, actor, order -> service.dispute(order, actor.userId(), reason), "争议", false);
         }
 
         if (!SUB_CREATE.equals(sub) && !SUB_CONFIRM.equals(sub)) {
@@ -224,6 +265,51 @@ public final class TradeCommandHandler {
     }
 
     /**
+     * 推进类命令的公共骨架（lock / deliver / release / refund / dispute）：
+     * 解析订单号 → 查单 → 交给服务层（权限与状态守卫都在那里）→ 统一回执。
+     *
+     * @param fundImplying 该迁移是否涉及资金语义——是则在回执尾部附上「链上未接入」标注
+     */
+    private String advance(BotCommand cmd, CommandActor actor, OrderStep step,
+                           String action, boolean fundImplying) {
+        Long orderId = parseLong(cmd.argOpt(1).orElse(null));
+        if (orderId == null) {
+            return USAGE;
+        }
+        EscrowOrder order = lookup.byId(orderId).orElse(null);
+        if (order == null) {
+            return "订单 #" + orderId + " 不存在（请核对订单号）";
+        }
+        try {
+            step.run(order);
+        } catch (ConcurrentOrderUpdateException ex) {
+            return "订单 #" + orderId + " 已被他人变更，请重查后再操作";
+        } catch (EscrowException ex) {
+            return "无法" + action + "：" + ex.getMessage();
+        }
+        String tail = fundImplying ? "\n" + CHAIN_CAVEAT : "";
+        return "订单 #" + orderId + " 已" + actionSucceeded(action) + "。" + tail;
+    }
+
+    /** 单步迁移：把订单交给服务层方法（本层不解释其返回值）。 */
+    @FunctionalInterface
+    private interface OrderStep {
+        Object run(EscrowOrder order);
+    }
+
+    /** 动作 → 成功回执措辞（不把服务层返回值当展示形态）。 */
+    private static String actionSucceeded(String action) {
+        return switch (action) {
+            case "托管" -> "进入「已锁仓（流程登记）」";
+            case "交付" -> "标记为「已交付（流程登记）」";
+            case "验收放款" -> "放款给卖方（流程登记）";
+            case "退款" -> "退款（流程登记）";
+            case "争议" -> "进入「争议中」，等待裁决";
+            default -> action + "（完成）";
+        };
+    }
+
+    /**
      * T2 状态查询：订单号 → 用户可读状态视图。
      *
      * <p>查不到<b>不是错误</b>——按用户视角回「不存在」，而不是抛异常或空响应。
@@ -239,8 +325,38 @@ public final class TradeCommandHandler {
                 .map(EscrowOrder::currentState)
                 .map(TradeStatusView::of)
                 .map(view -> "订单 #" + orderId + "：" + view.summary()
-                        + "\n下一步：" + view.nextStep())
+                        + "\n下一步：" + view.nextStep()
+                        + statusHint(orderId, view.state())
+                        + fundCaveat(view.state()))
                 .orElse("订单 #" + orderId + " 不存在（请核对订单号）");
+    }
+
+    /**
+     * 给出「此刻真实可用」的命令——否则状态文案会指挥用户去发一条不存在的命令。
+     *
+     * <p>命令语法刻意留在命令层：域层的 {@link TradeStatusView} 只说状态与人话，
+     * 不携带 Bot 的命令词汇（否则分层就漏了）。
+     */
+    private static String statusHint(long orderId, EscrowOrder.State state) {
+        return switch (state) {
+            case OPEN -> "\n可用操作：/escrow confirm <卖方ID> <金额> <币种>（卖方接单）";
+            case CONFIRMED -> "\n可用操作：/escrow lock " + orderId + "（买方托管登记）";
+            case LOCKED -> "\n可用操作：/escrow deliver " + orderId + "（卖方交付）、"
+                    + "/escrow dispute " + orderId + " <理由>（发起争议）";
+            case DELIVERED -> "\n可用操作：/escrow release " + orderId + "（买方验收放款）、"
+                    + "/escrow dispute " + orderId + " <理由>（发起争议）";
+            case DISPUTED -> "\n可用操作：/escrow release " + orderId + "（协商放款）、"
+                    + "/escrow refund " + orderId + " <理由>（协商退款）";
+            case RELEASED, REFUNDED, CANCELLED -> "";
+        };
+    }
+
+    /** 状态语义涉及资金时，回执必须带上链上未接入的标注——否则等于默认「钱动了」。 */
+    private static String fundCaveat(EscrowOrder.State state) {
+        return switch (state) {
+            case LOCKED, RELEASED, REFUNDED -> "\n" + CHAIN_CAVEAT;
+            default -> "";
+        };
     }
 
     /**
