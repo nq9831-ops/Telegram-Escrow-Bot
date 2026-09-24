@@ -74,8 +74,11 @@ public final class LogSanitizer {
     /** 用户 ID 掩码的前缀，便于在日志中辨认这是脱敏后的标识。 */
     private static final String USER_PREFIX = "u:";
 
-    /** 掩码保留的十六进制位数（24 bit）。 */
+    /** 掩码保留的十六进制位数（24 bit）——旧无盐方法用；新代码用带盐方法（48 bit）。 */
     private static final int HASH_HEX_CHARS = 6;
+
+    /** 带盐方法保留的十六进制位数（48 bit，碰撞空间 2^48）。 */
+    private static final int SALT_HASH_HEX_CHARS = 12;
 
     private LogSanitizer() {
     }
@@ -94,21 +97,41 @@ public final class LogSanitizer {
     }
 
     /**
-     * 把用户 ID 转成不可反查、但可关联的标识。
+     * 把用户 ID 转成不可反查、但可关联的标识（无盐——<b>仅向后兼容</b>）。
+     *
+     * <p><b>预映像风险</b>：无盐哈希可被预计算字典反推，且 24 bit 空间在大用户量下会碰撞。
+     * <b>新代码请使用 {@link #maskUserId(long, String)}</b>（带部署级盐 + 48 bit 输出）。
      *
      * <p>**调用方必须显式调用**——本类不提供"自动掩码所有数字"的入口，
      * 因为那会同时掩掉订单号和金额，使日志失去排查价值。
      */
     public static String maskUserId(long userId) {
-        return USER_PREFIX + shortHash(Long.toString(userId));
+        return USER_PREFIX + shortHash(Long.toString(userId), HASH_HEX_CHARS);
     }
 
-    private static String shortHash(String value) {
+    /**
+     * 把用户 ID 转成不可反查、但可关联的标识（<b>带盐，推荐</b>，ET-57 预映像防护）。
+     *
+     * <p>盐来自部署级配置（环境变量注入）：不同部署产生不同映射，字典预计算跨部署失效；
+     * 输出 48 bit（12 位 hex）把碰撞空间从 2²⁴ 提高到 2⁴⁸。同一盐内同一 ID 恒定映射，
+     * 日志仍可把同一用户的事件串起来——可关联，不可反查。
+     *
+     * @param userId 用户 ID
+     * @param salt   部署级盐值（<b>必填</b>——无盐调用等于没修，故 fail-closed）
+     */
+    public static String maskUserId(long userId, String salt) {
+        if (salt == null || salt.isBlank()) {
+            throw new TggException("用户 ID 脱敏：盐值必须提供（无盐哈希可被预计算反推）");
+        }
+        return USER_PREFIX + shortHash(salt + ":" + userId, SALT_HASH_HEX_CHARS);
+    }
+
+    private static String shortHash(String value, int hexChars) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
             byte[] bytes = digest.digest(value.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder(HASH_HEX_CHARS);
-            for (int i = 0; i < HASH_HEX_CHARS / 2; i++) {
+            StringBuilder sb = new StringBuilder(hexChars);
+            for (int i = 0; i < hexChars / 2; i++) {
                 sb.append(Character.forDigit((bytes[i] >> 4) & 0xF, 16));
                 sb.append(Character.forDigit(bytes[i] & 0xF, 16));
             }
