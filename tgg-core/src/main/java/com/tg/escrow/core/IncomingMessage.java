@@ -47,9 +47,11 @@ import com.tg.escrow.common.TggException;
  * @param mediaKind 媒体种类
  * @param fileName  文件名（仅文档类媒体有；否则 {@code null}）
  * @param mimeType  MIME 类型（未知时 {@code null}）
+ * @param chatKind  聊天类型（决定内容安全是否适用；见 {@link ChatKind#moderatable()}）
  */
 public record IncomingMessage(long chatId, long userId, long messageId, String text,
-                              MediaKind mediaKind, String fileName, String mimeType) {
+                              MediaKind mediaKind, String fileName, String mimeType,
+                              ChatKind chatKind) {
 
     /** 媒体种类。{@code NONE} 表示纯文本消息。 */
     public enum MediaKind {
@@ -78,11 +80,27 @@ public record IncomingMessage(long chatId, long userId, long messageId, String t
         if (mediaKind == null) {
             throw new TggException("入站消息：媒体种类未提供");
         }
+        if (chatKind == null) {
+            throw new TggException("入站消息：聊天类型未提供（决定内容安全是否适用）");
+        }
     }
 
-    /** 纯文本消息的便捷构造（无媒体、无文件名/类型）。 */
+    /**
+     * 便捷构造：不带聊天类型时按<b>超级群</b>处理（群聊语义）。
+     *
+     * <p>刻意取群聊而非"未知"：内容安全是"宁可多判不可漏判"的方向，且需要显式指定类型的
+     * 真实路径（{@code TelegramBotHandler.toIncoming}）总会给出类型。测试里用这个构造
+     * 等价于"测群聊行为"，可读性更好。
+     */
+    public IncomingMessage(long chatId, long userId, long messageId, String text,
+                           MediaKind mediaKind, String fileName, String mimeType) {
+        this(chatId, userId, messageId, text, mediaKind, fileName, mimeType, ChatKind.SUPERGROUP);
+    }
+
+    /** 纯文本消息的便捷构造（无媒体、无文件名/类型；按群聊处理）。 */
     public static IncomingMessage text(long chatId, long userId, long messageId, String text) {
-        return new IncomingMessage(chatId, userId, messageId, text, MediaKind.NONE, null, null);
+        return new IncomingMessage(chatId, userId, messageId, text, MediaKind.NONE, null, null,
+                ChatKind.SUPERGROUP);
     }
 
     /** 是否带媒体（{@code NONE} 之外都算）。 */

@@ -115,6 +115,41 @@ class MessageGuardOrchestratorTest {
         assertThat(d.reason()).contains("t.cn");
     }
 
+    @Test
+    @DisplayName("【缺陷复现】私聊消息带可疑链接 → 不得处置（内容安全是群治理，不适用于私聊）")
+    void privateChatIsNotModerated() {
+        IncomingMessage priv = new IncomingMessage(CHAT, USER, MSG, "领奖 http://evil.example/x",
+                IncomingMessage.MediaKind.NONE, null, null, ChatKind.PRIVATE);
+
+        assertThat(guard(10).inspect(priv).blocked())
+                .as("私聊里删用户消息既非治理目的、也是对用户的敌意行为")
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("群聊同一内容仍必须拦（修私聊不得把群聊也放过）")
+    void groupChatStillModerated() {
+        IncomingMessage group = new IncomingMessage(CHAT, USER, MSG, "领奖 http://evil.example/x",
+                IncomingMessage.MediaKind.NONE, null, null, ChatKind.SUPERGROUP);
+
+        assertThat(guard(10).inspect(group).blocked()).isTrue();
+    }
+
+    @Test
+    @DisplayName("频道（CHANNEL）不适用内容安全 → 放行")
+    void channelIsNotModerated() {
+        IncomingMessage channel = new IncomingMessage(CHAT, USER, MSG, "领奖 http://evil.example/x",
+                IncomingMessage.MediaKind.NONE, null, null, ChatKind.CHANNEL);
+
+        assertThat(guard(10).inspect(channel).blocked()).isFalse();
+    }
+
+    @Test
+    @DisplayName("兼容构造（不带聊天类型）按群聊处理——既有调用点语义不变")
+    void convenienceCtorBehavesAsGroup() {
+        assertThat(guard(10).inspect(text("领奖 http://evil.example/x")).blocked()).isTrue();
+    }
+
     // ── 媒体 ────────────────────────────────────────────────────────────
 
     @Test

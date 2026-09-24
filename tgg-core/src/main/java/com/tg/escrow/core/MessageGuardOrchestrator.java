@@ -106,6 +106,11 @@ public final class MessageGuardOrchestrator {
             throw new TggException("内容安全：消息不可为空");
         }
 
+        // 0) 适用性前置：内容是群治理手段，私聊/频道不适用（见 ChatKind.moderatable）
+        if (!message.chatKind().moderatable()) {
+            return Decision.allow();
+        }
+
         // 1) 链接：可疑（非白名单 / 短链）即拦
         if (message.text() != null && !message.text().isBlank()) {
             Optional<LinkMatch> hit = links.firstLink(message.text());

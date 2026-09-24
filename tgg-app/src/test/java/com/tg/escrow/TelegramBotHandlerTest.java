@@ -24,6 +24,7 @@
 package com.tg.escrow;
 
 import com.tg.escrow.core.BannedWordRegistry;
+import com.tg.escrow.core.ChatKind;
 import com.tg.escrow.core.IncomingMessage;
 import com.tg.escrow.core.KeywordAutoReply;
 import com.tg.escrow.core.ModerationOrchestrator;
@@ -376,6 +377,31 @@ class TelegramBotHandlerTest {
         assertThat(mapped.text()).isEqualTo("你好");
         assertThat(mapped.mediaKind()).isEqualTo(IncomingMessage.MediaKind.NONE);
         assertThat(mapped.hasMedia()).isFalse();
+    }
+
+    @Test
+    @DisplayName("聊天类型映射：私人/群/超级群 → 对应枚举；内容安全只对群生效")
+    void mapsChatKind() {
+        assertThat(TelegramBotHandler.toIncoming(rawChat(1L, "private")).chatKind())
+                .isEqualTo(ChatKind.PRIVATE);
+        assertThat(TelegramBotHandler.toIncoming(rawChat(1L, "group")).chatKind())
+                .isEqualTo(ChatKind.GROUP);
+        assertThat(TelegramBotHandler.toIncoming(rawChat(1L, "supergroup")).chatKind())
+                .isEqualTo(ChatKind.SUPERGROUP);
+        // 无法识别 → CHANNEL（不适用内容安全：无法确认是群就不删消息）
+        assertThat(TelegramBotHandler.toIncoming(rawChat(1L, "whatever")).chatKind())
+                .isEqualTo(ChatKind.CHANNEL);
+        assertThat(ChatKind.PRIVATE.moderatable()).isFalse();
+        assertThat(ChatKind.SUPERGROUP.moderatable()).isTrue();
+    }
+
+    private static Message rawChat(long chatId, String type) {
+        Message message = new Message();
+        message.setMessageId(1);
+        message.setChat(new Chat(chatId, type));
+        message.setFrom(new User(4242L, "tester", false));
+        message.setText("hi");
+        return message;
     }
 
     @Test

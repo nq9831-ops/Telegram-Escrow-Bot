@@ -23,11 +23,13 @@
  */
 package com.tg.escrow;
 
+import com.tg.escrow.core.ChatKind;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.core.IncomingMessage;
 import com.tg.escrow.core.MemberRole;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
 import org.telegram.telegrambots.meta.api.objects.Document;
+import org.telegram.telegrambots.meta.api.objects.chat.Chat;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
 
@@ -117,7 +119,28 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
         return new IncomingMessage(chatId, userId, messageId, message.getText(),
                 mediaKindOf(message),
                 document == null ? null : document.getFileName(),
-                document == null ? null : document.getMimeType());
+                document == null ? null : document.getMimeType(),
+                chatKindOf(message));
+    }
+
+    /**
+     * Telegram {@code Chat.type} → 本项目的 {@link ChatKind}。
+     *
+     * <p>无法识别时归 {@link ChatKind#CHANNEL}——该值在
+     * {@link ChatKind#moderatable()} 下为"不适用"，即<b>不</b>执行删消息。
+     * 方向是刻意的：无法确认是群，就不做破坏性动作。
+     */
+    private static ChatKind chatKindOf(Message message) {
+        Chat chat = message.getChat();
+        if (chat == null || chat.getType() == null) {
+            return ChatKind.CHANNEL;
+        }
+        return switch (chat.getType()) {
+            case "private" -> ChatKind.PRIVATE;
+            case "group" -> ChatKind.GROUP;
+            case "supergroup" -> ChatKind.SUPERGROUP;
+            default -> ChatKind.CHANNEL;
+        };
     }
 
     /** Telegram 的媒体字段 → 本项目的媒体种类。无媒体即 {@code NONE}。 */
