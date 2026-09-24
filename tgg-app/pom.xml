@@ -47,6 +47,12 @@
       <version>10.3.0</version>
     </dependency>
 
+    <!-- Admin API（S6）：违禁词在线管理等后台端点。 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
