@@ -70,8 +70,8 @@ class TradeCommandHandlerTest {
         }
     }
 
-    private static BotCommand createCmd(String seller, String amount, String currency) {
-        return new BotCommand("escrow", List.of("create", seller, amount, currency));
+    private static BotCommand confirmCmd(String seller, String amount, String currency) {
+        return new BotCommand("escrow", List.of("confirm", seller, amount, currency));
     }
 
     /** 用真实 gate + 真实 service 装配 handler。ctx 决定门禁看到的事实。 */
@@ -83,7 +83,9 @@ class TradeCommandHandlerTest {
                 id, ctx.activeTradeCount(), ctx.lastCompletedTradeAt(), ctx.hasUnresolvedDispute());
         Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
         return new TradeCommandHandler(
-                new EscrowTradeService(gate, history, new InMemoryStore(), clock));
+                new EscrowTradeService(gate, history, new InMemoryStore(), clock),
+                new com.tg.escrow.escrow.AmountTierPolicy(
+                        new java.math.BigDecimal("100"), new java.math.BigDecimal("1000")));
     }
 
     private static TradeAdmissionContext clean() {
@@ -100,12 +102,27 @@ class TradeCommandHandlerTest {
         assertThat(h.canHandle(null)).isFalse();
     }
 
+    private static BotCommand createCmd(String seller, String amount, String currency) {
+        return new BotCommand("escrow", List.of("create", seller, amount, currency));
+    }
+
     @Test
-    @DisplayName("成功创建 → 回执含订单号")
+    @DisplayName("create 为预览：返回风险提示（ET-34 创建前强制展示），不落单")
+    void createPreviewsWithRiskPrompt() {
+        TradeCommandHandler h = handler(1, Duration.ZERO, clean());
+
+        String out = h.handle(createCmd("2002", "100", "USDT"), ACTOR);
+
+        assertThat(out).contains("确认").contains("100");   // 风险提示（说人话）
+        assertThat(out).doesNotContain("已创建订单");         // 预览不落单
+    }
+
+    @Test
+    @DisplayName("confirm 真正落单 → 回执含订单号")
     void createsOrder() {
         TradeCommandHandler h = handler(1, Duration.ZERO, clean());
 
-        assertThat(h.handle(createCmd("2002", "100", "USDT"), ACTOR)).isEqualTo("已创建订单 #1");
+        assertThat(h.handle(confirmCmd("2002", "100", "USDT"), ACTOR)).isEqualTo("已创建订单 #1");
     }
 
     @Test
@@ -114,7 +131,7 @@ class TradeCommandHandlerTest {
         TradeCommandHandler h = handler(1, Duration.ZERO,
                 new TradeAdmissionContext(BUYER, 1, null, false));
 
-        String out = h.handle(createCmd("2002", "100", "USDT"), ACTOR);
+        String out = h.handle(confirmCmd("2002", "100", "USDT"), ACTOR);
 
         assertThat(out).contains("被拒").contains("已有进行中的交易");
     }
@@ -125,7 +142,7 @@ class TradeCommandHandlerTest {
         TradeCommandHandler h = handler(5, Duration.ofHours(24),
                 new TradeAdmissionContext(BUYER, 0, T0.minus(Duration.ofHours(1)), false));
 
-        String out = h.handle(createCmd("2002", "100", "USDT"), ACTOR);
+        String out = h.handle(confirmCmd("2002", "100", "USDT"), ACTOR);
 
         assertThat(out).contains("被拒").contains("冷却期未满")
                 .contains("可重试：").doesNotContain("暂无法预估");
@@ -137,7 +154,7 @@ class TradeCommandHandlerTest {
         TradeCommandHandler h = handler(5, Duration.ZERO,
                 new TradeAdmissionContext(BUYER, 0, null, true));
 
-        String out = h.handle(createCmd("2002", "100", "USDT"), ACTOR);
+        String out = h.handle(confirmCmd("2002", "100", "USDT"), ACTOR);
 
         assertThat(out).contains("被拒").contains("存在未决争议").contains("暂无法预估");
     }
@@ -162,7 +179,7 @@ class TradeCommandHandlerTest {
     void selfTradeRejected() {
         TradeCommandHandler h = handler(5, Duration.ZERO, clean());
 
-        assertThat(h.handle(createCmd(String.valueOf(BUYER), "100", "USDT"), ACTOR))
+        assertThat(h.handle(confirmCmd(String.valueOf(BUYER), "100", "USDT"), ACTOR))
                 .contains("无法创建");
     }
 

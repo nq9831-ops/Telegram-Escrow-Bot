@@ -28,45 +28,48 @@ import com.tg.escrow.core.BannedWordMatcher;
 import com.tg.escrow.core.BannedWordRegistry;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.core.CommandParser;
+import com.tg.escrow.core.KeywordAutoReply;
 
 import java.util.Optional;
 
 /**
- * Bot 命令分发器（S1 路由 + GM-06 违禁词接线）：文本 → 解析 → 违禁词 → 路由 → 回执。
+ * Bot 命令分发器（S1 路由 + GM-06 违禁词 + GM-17 自动回复接线）。
  *
- * <h2>路由语义</h2>
- * <ul>
- *   <li>命令：{@code /escrow …} → {@link TradeCommandHandler}；其它命令 → 帮助回执；
- *       发给别的 bot 的 {@code @} 后缀命令不响应；</li>
- *   <li><b>非命令消息过违禁词</b>（{@link BannedWordRegistry}，按群）——命中给出处置回执
- *       （删消息属 Telegram API 能力，线上接，见 {@code docs/ONLINE-VERIFICATION.md} A5）；
- *       不命中不响应（返回 {@code null}）。</li>
- * </ul>
+ * <h2>非命令消息的路由顺序（定死）</h2>
+ * <ol>
+ *   <li><b>违禁词</b>（{@link BannedWordRegistry}，按群）→ 处置回执——安全优先于应答；</li>
+ *   <li><b>自动回复</b>（{@link KeywordAutoReply}）→ 预设回复；</li>
+ *   <li>都不命中 → 不响应（{@code null}）。</li>
+ * </ol>
  *
- * <p>纯逻辑：Telegram Update 解析与 API 调用在 {@code TelegramBotHandler} 胶水层。
+ * <p>命令：{@code /escrow …} → {@link TradeCommandHandler}；其它命令 → 帮助；
+ * 发给别的 bot 的 {@code @} 后缀命令不响应。纯逻辑，Telegram 胶水在 {@code TelegramBotHandler}。
  */
 public final class BotDispatcher {
 
-    private static final String HELP = "我是担保交易助手。用法：/escrow create <卖方ID> <金额> <币种>——"
-            + "创建一笔担保交易。";
+    private static final String HELP = "我是担保交易助手。用法：/escrow create <卖方ID> <金额> <币种> 预览风险；"
+            + "确认后 /escrow confirm 创建交易。";
 
     private final TradeCommandHandler tradeHandler;
     private final String botUsername;
     private final BannedWordRegistry bannedWords;
+    private final KeywordAutoReply autoReply;
 
     /**
      * @param tradeHandler 交易命令处理器
      * @param botUsername  本 bot 用户名（不含 {@code @}）
-     * @param bannedWords  违禁词注册表（非命令消息的生产消费者）
+     * @param bannedWords  违禁词注册表
+     * @param autoReply    自动回复（GM-17 的生产消费者）
      */
     public BotDispatcher(TradeCommandHandler tradeHandler, String botUsername,
-                         BannedWordRegistry bannedWords) {
-        if (tradeHandler == null || bannedWords == null) {
-            throw new TggException("命令分发：交易处理器与违禁词注册表均不可为空");
+                         BannedWordRegistry bannedWords, KeywordAutoReply autoReply) {
+        if (tradeHandler == null || bannedWords == null || autoReply == null) {
+            throw new TggException("命令分发：处理器/违禁词注册表/自动回复均不可为空");
         }
         this.tradeHandler = tradeHandler;
         this.botUsername = botUsername;
         this.bannedWords = bannedWords;
+        this.autoReply = autoReply;
     }
 
     /**
@@ -89,8 +92,12 @@ public final class BotDispatcher {
             }
             return HELP;
         }
-        // 非命令消息：违禁词检查（命中给出处置回执）
+        // 1) 违禁词优先（安全 > 应答）
         Optional<BannedWordMatcher.Match> hit = bannedWords.firstMatch(chatId, text);
-        return hit.map(m -> "⚠️ 消息含违禁内容（命中规则：" + m.rule() + "），请文明交流。").orElse(null);
+        if (hit.isPresent()) {
+            return "⚠️ 消息含违禁内容（命中规则：" + hit.get().rule() + "），请文明交流。";
+        }
+        // 2) 自动回复
+        return autoReply.replyFor(text).orElse(null);
     }
 }

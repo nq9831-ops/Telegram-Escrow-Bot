@@ -71,11 +71,55 @@ class BotDispatcherTest {
         TradeHistoryPort history = id -> new TradeAdmissionContext(id, 0, null, false);
         EscrowTradeService service = new EscrowTradeService(gate, history,
                 new InMemoryStore(), Clock.fixed(T0, ZoneOffset.UTC));
-        return new BotDispatcher(new TradeCommandHandler(service), "mybot", registry);
+        return new BotDispatcher(new TradeCommandHandler(service, new com.tg.escrow.escrow.AmountTierPolicy(
+                        new java.math.BigDecimal("100"), new java.math.BigDecimal("1000"))),
+                "mybot", registry, new com.tg.escrow.core.KeywordAutoReply());
+    }
+
+    private static BotDispatcher dispatcher(com.tg.escrow.core.KeywordAutoReply autoReply) {
+        TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
+        TradeHistoryPort history = id -> new TradeAdmissionContext(id, 0, null, false);
+        EscrowTradeService service = new EscrowTradeService(gate, history,
+                new InMemoryStore(), Clock.fixed(T0, ZoneOffset.UTC));
+        return new BotDispatcher(new TradeCommandHandler(service, new com.tg.escrow.escrow.AmountTierPolicy(
+                        new java.math.BigDecimal("100"), new java.math.BigDecimal("1000"))),
+                "mybot", new BannedWordRegistry(), autoReply);
     }
 
     private static BotDispatcher dispatcher() {
         return dispatcher(new BannedWordRegistry());
+    }
+
+    @Test
+    @DisplayName("自动回复：普通消息命中关键词 → 返回预设回复（KeywordAutoReply 的生产消费者）")
+    void autoReplyHit() {
+        com.tg.escrow.core.KeywordAutoReply autoReply = new com.tg.escrow.core.KeywordAutoReply();
+        autoReply.register("怎么收费", "平台费默认 0%。");
+
+        String reply = dispatcher(autoReply).handle(100L, "请问 怎么收费", ACTOR);
+
+        assertThat(reply).isEqualTo("平台费默认 0%。");
+    }
+
+    @Test
+    @DisplayName("违禁词优先于自动回复（同时命中给处置回执）")
+    void bannedWordBeatsAutoReply() {
+        com.tg.escrow.core.KeywordAutoReply autoReply = new com.tg.escrow.core.KeywordAutoReply();
+        autoReply.register("广告词", "自动回复");
+        BannedWordRegistry registry = new BannedWordRegistry();
+        registry.reload(100L, java.util.List.of("广告词"), java.util.List.of());
+        com.tg.escrow.core.KeywordAutoReply unused = autoReply; // 同名关键词场景
+        TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
+        TradeHistoryPort history = id -> new TradeAdmissionContext(id, 0, null, false);
+        EscrowTradeService service = new EscrowTradeService(gate, history,
+                new InMemoryStore(), Clock.fixed(T0, ZoneOffset.UTC));
+        BotDispatcher d = new BotDispatcher(new TradeCommandHandler(service,
+                new com.tg.escrow.escrow.AmountTierPolicy(new java.math.BigDecimal("100"),
+                        new java.math.BigDecimal("1000"))), "mybot", registry, unused);
+
+        String reply = d.handle(100L, "看这个 广告词", ACTOR);
+
+        assertThat(reply).contains("违禁");
     }
 
     @Test
@@ -107,7 +151,7 @@ class BotDispatcherTest {
     @Test
     @DisplayName("escrow 命令 → 路由到交易处理器，回执含订单号")
     void escrowCommandRouted() {
-        String reply = dispatcher().handle(100L, "/escrow create 2002 100 USDT", ACTOR);
+        String reply = dispatcher().handle(100L, "/escrow confirm 2002 100 USDT", ACTOR);
 
         assertThat(reply).contains("已创建订单");
     }
@@ -123,7 +167,7 @@ class BotDispatcherTest {
     @Test
     @DisplayName("@botname 后缀：发给别的 bot 的命令不响应")
     void commandForOtherBotIgnored() {
-        assertThat(dispatcher().handle(100L, "/escrow@otherbot create 2002 100 USDT", ACTOR)).isNull();
+        assertThat(dispatcher().handle(100L, "/escrow@otherbot confirm 2002 100 USDT", ACTOR)).isNull();
     }
 
     @Test
@@ -132,6 +176,6 @@ class BotDispatcherTest {
         BotDispatcher d = dispatcher();
 
         assertThat(d.handle(100L, null, ACTOR)).isNull();
-        assertThat(d.handle(100L, "/escrow create 2002 100 USDT", null)).isNull();
+        assertThat(d.handle(100L, "/escrow confirm 2002 100 USDT", null)).isNull();
     }
 }

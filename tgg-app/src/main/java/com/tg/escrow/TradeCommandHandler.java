@@ -27,7 +27,9 @@ import com.tg.escrow.common.EscrowException;
 import com.tg.escrow.common.TggException;
 import com.tg.escrow.core.BotCommand;
 import com.tg.escrow.core.CommandActor;
+import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowTradeService;
+import com.tg.escrow.escrow.RiskPrompt;
 import com.tg.escrow.escrow.TradeAdmissionDecision;
 import com.tg.escrow.escrow.TradeInitiationRequest;
 import com.tg.escrow.escrow.TradeInitiationResult;
@@ -35,34 +37,35 @@ import com.tg.escrow.escrow.TradeInitiationResult;
 import java.math.BigDecimal;
 
 /**
- * 交易命令处理器（原文档 S2 / T1 收口）——把解析后的命令接到 {@link EscrowTradeService}。
+ * 交易命令处理器（S2 / T1 收口）——两步流：<b>create 预览风险提示（ET-34 创建前强制展示），
+ * confirm 真正落单</b>。
  *
- * <h2>它补的缺口</h2>
- * <p>{@link EscrowTradeService} 此前没有任何生产调用方——一条完整的业务路径
- * （解析 → 鉴权 → 创建 → 回执）缺了"创建→回执"这一环。本类把 {@code /escrow create}
- * 接上服务，并负责把结果翻译成<b>用户能读的中文回执</b>。
+ * <h2>为什么两步</h2>
+ * <p>ET-34 要求"创建交易前<b>强制</b>展示风险提示"——一步创建只算"创建后提示"，
+ * 挡不住手滑。两步流把提示变成必经环节：{@code create} 不落单、只回风险提示与确认用法；
+ * {@code confirm} 才调 {@link EscrowTradeService#initiate}。
  *
- * <h2>为什么回执要带"为什么"和"何时能再来"</h2>
- * <p>被拒是正常业务结果。只说"不行"会让用户反复重试并误以为系统故障——
- * 所以回执必须含拒绝原因与可重试时刻（无法预估时明说"暂无法预估"）。
- *
- * <h2>只管 escrow</h2>
- * <p>{@link #canHandle} 判定是否由本处理器管辖；{@link #handle} 只处理 escrow 命令。
- * 分发器据此把命令路由到对应处理器。
+ * <h2>被拒回执</h2>
+ * <p>含拒绝原因与可重试时刻（无法预估时明说"暂无法预估"）——被拒是正常业务结果，
+ * 用户必须知道"为什么"和"何时能再来"。
  */
 public final class TradeCommandHandler {
 
     private static final String COMMAND = "escrow";
     private static final String SUB_CREATE = "create";
-    private static final String USAGE = "用法：/escrow create <卖方ID> <金额> <币种>";
+    private static final String SUB_CONFIRM = "confirm";
+    private static final String USAGE = "用法：/escrow create <卖方ID> <金额> <币种> 预览风险；"
+            + "确认后发 /escrow confirm <卖方ID> <金额> <币种> 创建交易";
 
     private final EscrowTradeService service;
+    private final AmountTierPolicy tierPolicy;
 
-    public TradeCommandHandler(EscrowTradeService service) {
-        if (service == null) {
-            throw new TggException("命令处理：未提供交易服务");
+    public TradeCommandHandler(EscrowTradeService service, AmountTierPolicy tierPolicy) {
+        if (service == null || tierPolicy == null) {
+            throw new TggException("命令处理：交易服务与金额分层策略均不可为空");
         }
         this.service = service;
+        this.tierPolicy = tierPolicy;
     }
 
     /** 本处理器是否管辖该命令。 */
@@ -86,7 +89,8 @@ public final class TradeCommandHandler {
             throw new TggException("命令处理：不处理的命令 " + cmd.name());
         }
 
-        if (!SUB_CREATE.equals(cmd.argOpt(0).orElse(null))) {
+        String sub = cmd.argOpt(0).orElse(null);
+        if (!SUB_CREATE.equals(sub) && !SUB_CONFIRM.equals(sub)) {
             return USAGE;
         }
 
@@ -97,12 +101,18 @@ public final class TradeCommandHandler {
             return USAGE;
         }
 
+        if (SUB_CREATE.equals(sub)) {
+            // ET-34：创建前强制展示风险提示——本分支不落单
+            String prompt = RiskPrompt.forAmount(amount, tierPolicy);
+            return "⚠️ 交易前风险提示：" + prompt
+                    + "\n确认无误请发：/escrow confirm " + sellerId + " " + amount + " " + currency;
+        }
+
         TradeInitiationResult result;
         try {
             result = service.initiate(
                     new TradeInitiationRequest(actor.userId(), sellerId, amount, currency));
         } catch (EscrowException ex) {
-            // 请求自身不合法（自交易、金额非正等）——事实错误，直接告知
             return "无法创建：" + ex.getMessage();
         }
 
