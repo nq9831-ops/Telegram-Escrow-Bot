@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>发起担保交易</title>
+  <title>担保交易</title>
   <!-- Telegram 官方 Mini App SDK：必须 HTTPS 加载，提供 window.Telegram.WebApp -->
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
@@ -45,7 +45,7 @@
       color: var(--hint);
     }
     #risk.strong { color: var(--danger); font-weight: 600; }
-    button#submit {
+    button {
       width: 100%;
       padding: 14px;
       margin-top: 12px;
@@ -56,41 +56,62 @@
       background: var(--btn);
       color: var(--btn-text);
     }
-    button#submit:disabled { opacity: .5; }
+    button:disabled { opacity: .5; }
     #result { margin-top: 16px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
     #result.ok { color: #2e7d32; }
     #result.err { color: var(--danger); }
+    #linkBox {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 10px;
+      background: var(--secondary-bg);
+      font-size: 13px;
+      line-height: 1.6;
+      word-break: break-all;
+      color: var(--text);
+    }
+    #inviteLink { color: var(--btn); }
   </style>
 </head>
 <body>
-  <h1>发起担保交易</h1>
+  <h1 id="title">发起担保交易</h1>
 
-  <form id="form">
-    <label for="sellerId">对方用户 ID</label>
-    <input id="sellerId" name="sellerId" type="number" inputmode="numeric" min="1" placeholder="例如 2002" required>
-
+  <!-- 邀请视图（无 start_param）：本页作为「发起人」，填金额+币种生成转发链接 -->
+  <section id="inviteView" hidden>
     <label for="amount">金额</label>
-    <input id="amount" name="amount" type="text" inputmode="decimal" placeholder="例如 100" required>
+    <input id="amount" name="amount" type="text" inputmode="decimal" placeholder="例如 100">
 
     <label for="currency">币种</label>
-    <select id="currency" name="currency" required>
+    <select id="currency" name="currency">
       <!-- 币种白名单（Wave 0）：只结算 TON 与 TON 链上的 USDT；value 须与服务端 TradeCurrency 一致 -->
       <option value="TON">TON</option>
       <option value="USDT">USDT（TON 链）</option>
     </select>
 
     <div id="risk"></div>
-    <button id="submit" type="submit">创建交易</button>
-  </form>
+    <button id="inviteBtn" type="button">生成邀请链接</button>
+  </section>
+
+  <!-- 接受视图（有 start_param）：本页作为「对方」，确认即成为该单卖方 -->
+  <section id="acceptView" hidden>
+    <p id="acceptHint">你被邀请接受一笔担保交易。确认后你将成为本单卖方，发起人随后托管资金。</p>
+    <button id="acceptBtn" type="button">确认接受</button>
+  </section>
 
   <div id="result" role="status" aria-live="polite"></div>
+
+  <div id="linkBox" hidden>
+    <div>把下面链接发给对方，对方点开即自动接单：</div>
+    <div id="inviteLink"></div>
+  </div>
 
   <script>
     (function () {
       var tg = window.Telegram && window.Telegram.WebApp;
+      var out = document.getElementById('result');
       if (!tg) {
-        document.getElementById('result').className = 'err';
-        document.getElementById('result').textContent = '请在 Telegram 内打开本页面。';
+        out.className = 'err';
+        out.textContent = '请在 Telegram 内打开本页面。';
         return;
       }
       tg.ready();
@@ -112,56 +133,76 @@
         tg.BackButton.onClick(function () { tg.close(); });
       }
 
-      var riskEl = document.getElementById('risk');
-      riskEl.textContent = '提交前请确认：对方身份、金额与币种。创建后可自行核对风险提示。';
-
-      var form = document.getElementById('form');
-      var btn = document.getElementById('submit');
-      var out = document.getElementById('result');
-
-      form.addEventListener('submit', function (ev) {
-        ev.preventDefault();
-        out.textContent = '';
-        out.className = '';
-
-        var sellerId = parseInt(document.getElementById('sellerId').value, 10);
-        var amount = document.getElementById('amount').value.trim();
-        var currency = document.getElementById('currency').value;
-
-        if (!sellerId || sellerId <= 0 || !amount) {
-          out.className = 'err';
-          out.textContent = '请填写对方用户 ID 与金额。';
-          return;
+      /**
+       * 从 tg.initData 原始串里取 start_param（令牌）。
+       * 只用于「该显示哪个视图」这一 UI 判断；权威判定在服务端重新验签后做出。
+       * 刻意不读未签名的客户端字段——令牌必须来自带签名保护的原始串。
+       */
+      function startParamFromInitData() {
+        var raw = tg.initData || '';
+        var parts = raw.split('&');
+        for (var i = 0; i < parts.length; i++) {
+          var eq = parts[i].indexOf('=');
+          if (eq > 0 && parts[i].substring(0, eq) === 'start_param') {
+            var v = parts[i].substring(eq + 1);
+            try { return decodeURIComponent(v); } catch (e) { return v; }
+          }
         }
+        return null;
+      }
 
-        // 身份只来自 Telegram 签发的原始串；服务端验签，请求体里没有用户 ID 字段
-        var payload = {
-          initData: tg.initData,
-          sellerId: sellerId,
-          amount: amount,
-          currency: currency
-        };
-
-        btn.disabled = true;
-        btn.textContent = '提交中…';
-
-        fetch('/api/trade/create', {
+      function post(url, payload) {
+        return fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(payload)
-        })
-          .then(function (r) { return r.json().catch(function () { return null; }); })
+        }).then(function (r) { return r.json().catch(function () { return null; }); });
+      }
+
+      var inviteView = document.getElementById('inviteView');
+      var acceptView = document.getElementById('acceptView');
+      var token = startParamFromInitData();
+
+      if (token) {
+        // 有令牌 → 接受视图（身份与令牌同源于服务端验签，本页只负责触发）
+        document.getElementById('title').textContent = '接受担保交易邀请';
+        acceptView.hidden = false;
+      } else {
+        inviteView.hidden = false;
+        document.getElementById('risk').textContent =
+          '提交前请确认：金额与币种。生成链接后发给对方，对方点开即接单。';
+      }
+
+      document.getElementById('inviteBtn').addEventListener('click', function () {
+        var amount = document.getElementById('amount').value.trim();
+        var currency = document.getElementById('currency').value;
+        if (!amount) {
+          out.className = 'err';
+          out.textContent = '请填写金额。';
+          return;
+        }
+        out.textContent = '';
+        out.className = '';
+        var btn = document.getElementById('inviteBtn');
+        btn.disabled = true;
+        btn.textContent = '生成中…';
+
+        // 身份只来自 Telegram 签发的原始串；请求体里没有用户 ID 字段
+        post('/api/trade/invite', { initData: tg.initData, amount: amount, currency: currency })
           .then(function (body) {
             if (body && body.ok) {
               out.className = 'ok';
-              out.textContent = '已创建订单 #' + body.orderId + '\n' + (body.riskPrompt || '');
+              out.textContent = '已生成邀请（' + body.amount + ' ' + body.currency + '）。有效期至 ' + body.expiresAt + '。';
+              document.getElementById('inviteLink').textContent = body.inviteUrl;
+              document.getElementById('linkBox').hidden = false;
               if (body.riskPrompt) {
-                riskEl.textContent = '风险提示：' + body.riskPrompt;
-                riskEl.className = 'strong';
+                var r = document.getElementById('risk');
+                r.textContent = '风险提示：' + body.riskPrompt;
+                r.className = 'strong';
               }
             } else {
               out.className = 'err';
-              out.textContent = (body && body.error) ? body.error : '创建失败，请稍后重试。';
+              out.textContent = (body && body.error) ? body.error : '生成失败，请稍后重试。';
             }
           })
           .catch(function () {
@@ -170,7 +211,35 @@
           })
           .finally(function () {
             btn.disabled = false;
-            btn.textContent = '创建交易';
+            btn.textContent = '生成邀请链接';
+          });
+      });
+
+      document.getElementById('acceptBtn').addEventListener('click', function () {
+        out.textContent = '';
+        out.className = '';
+        var btn = document.getElementById('acceptBtn');
+        btn.disabled = true;
+        btn.textContent = '提交中…';
+
+        // 令牌在签名串的 start_param 里，无需也不应单独传
+        post('/api/trade/accept', { initData: tg.initData })
+          .then(function (body) {
+            if (body && body.ok) {
+              out.className = 'ok';
+              out.textContent = '已接受，订单 #' + body.orderId + '（' + body.amount + ' ' + body.currency + '）';
+            } else {
+              out.className = 'err';
+              out.textContent = (body && body.error) ? body.error : '接受失败，请稍后重试。';
+            }
+          })
+          .catch(function () {
+            out.className = 'err';
+            out.textContent = '网络异常，请稍后重试。';
+          })
+          .finally(function () {
+            btn.disabled = false;
+            btn.textContent = '确认接受';
           });
       });
     })();

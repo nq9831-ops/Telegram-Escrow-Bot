@@ -61,11 +61,12 @@ class MiniAppPageTest {
     }
 
     @Test
-    @DisplayName("页面在 classpath 下，且引了 Telegram SDK 与交易 API 路径")
+    @DisplayName("页面在 classpath 下，且引了 Telegram SDK 与两个邀请 API 路径")
     void pagePacksTelegramSdkAndApiPath() throws IOException {
         String html = page();
         assertThat(html).contains("telegram.org/js/telegram-web-app.js");
-        assertThat(html).contains("/api/trade/create");
+        assertThat(html).contains("/api/trade/invite");
+        assertThat(html).contains("/api/trade/accept");
     }
 
     @Test
@@ -95,5 +96,16 @@ class MiniAppPageTest {
         assertThat(html)
                 .as("白名单外的币种不应再出现在页面（服务端亦 fail-closed 拒绝）")
                 .doesNotContain("BTC", "ETH", "USDC");
+    }
+
+    @Test
+    @DisplayName("双模式：邀请令牌从 tg.initData 解析（受签名保护），绝不碰 initDataUnsafe")
+    void startParamParsedFromSignedInitData() throws IOException {
+        String html = page();
+        assertThat(html).contains("start_param");
+        assertThat(html).contains("tg.initData");
+        assertThat(html)
+                .as("未签名的令牌来源一旦出现，等于把『接哪条邀请』交给客户端")
+                .doesNotContain("initDataUnsafe");
     }
 }
