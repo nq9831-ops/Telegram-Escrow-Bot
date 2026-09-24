@@ -46,7 +46,7 @@
 
 | # | 缺口 | 规格 |
 |---|---|---|
-| S1 | **零用户可见表面** | `TelegramBotHandler` 实现 `SpringLongPollingBot`；`onUpdateReceived` → `CommandParser.parse(text, botUsername)` → `PermissionChecker.isAllowed` → 分发到服务 → 回复文案。**需要 A2 的 token**。回复文案要过 `LogSanitizer`。 |
+| S1 | **零用户可见表面** | `TelegramBotHandler` 实现 `SpringLongPollingBot`；`onUpdateReceived` → `CommandParser.parse(text, botUsername)` → `PermissionChecker.isAllowed` → 分发到服务 → 回复文案。**需要 A2 的 token**。回复文案要过 `LogSanitizer`。**交互规格**（见 `docs/requirements/10-交互细节.md`）：每个 callback **必须**调 `answerCallbackQuery`（否则按钮永久转圈）；按钮颜色**只作增强、文字必须自带语义**（旧客户端/色盲不可依赖颜色）；一次性按钮防重复提交；关键通知用永久消息、倒计时用临时/私聊。 |
 | S2 | **命令层接线** | `TradeCommandHandler.handle(BotCommand, CommandActor) → String`：`/escrow create <卖方> <金额> <币种>` → `EscrowTradeService.initiate` → 「已创建订单 #N」或「被拒：<原因>，可重试：<时刻>」。纯逻辑可测，是 Telegram 级用户验收的最后一环。 |
 | S3 | **Bot 内 6 项入口** | T1 完整化、T2 状态查询（`TradeStatusView`）、T3 信用分联动、T4 与群管理联动、T5 建群引导、T6 公告。 |
 | S4 | **真实链上源** | `HttpChainSource implements ChainSource`（对接 TON HTTP API），两个实例做双源交叉（复用 `BalanceCrossVerifier`）。**需确认 TON 的确认数语义**（见待决文档 D 节）。 |
