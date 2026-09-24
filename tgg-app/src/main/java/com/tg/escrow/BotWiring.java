@@ -26,8 +26,13 @@ package com.tg.escrow;
 import com.tg.escrow.core.BannedWordRegistry;
 import com.tg.escrow.core.GroupAdminPort;
 import com.tg.escrow.core.KeywordAutoReply;
+import com.tg.escrow.core.LinkFilter;
+import com.tg.escrow.core.MediaFilter;
 import com.tg.escrow.core.MemberRolePort;
+import com.tg.escrow.core.MessageGuardOrchestrator;
 import com.tg.escrow.core.ModerationOrchestrator;
+import com.tg.escrow.core.RateLimitPolicy;
+import com.tg.escrow.core.RateLimiter;
 import com.tg.escrow.core.WarningOrchestrator;
 import com.tg.escrow.core.WarningPolicy;
 import com.tg.escrow.moderation.WarningPort;
@@ -299,13 +304,69 @@ public class BotWiring {
         return new WarningOrchestrator(policy, moderation, defaultMute);
     }
 
+    /** 链接过滤白名单（逗号分隔；短链域名默认可疑）。 */
+    @Bean
+    public LinkFilter linkFilter(
+            @Value("${tgg.guard.allowed-domains:}") String allowedDomains,
+            @Value("${tgg.guard.shortener-domains:t.cn,bit.ly,tinyurl.com}") String shorteners) {
+        return new LinkFilter(splitCsv(allowedDomains), splitCsv(shorteners));
+    }
+
+    /** 媒体白名单（扩展名 + MIME）。 */
+    @Bean
+    public MediaFilter mediaFilter(
+            @Value("${tgg.guard.allowed-extensions:jpg,jpeg,png,gif,pdf,zip,doc,docx,xls,xlsx,pptx}")
+            String extensions,
+            @Value("${tgg.guard.allowed-mime-types:image/jpeg,image/png,image/gif,application/pdf}")
+            String mimeTypes) {
+        return new MediaFilter(new java.util.LinkedHashSet<>(splitCsv(extensions)),
+                new java.util.LinkedHashSet<>(splitCsv(mimeTypes)));
+    }
+
+    /** 三级限流（用户/群组/全局）。阈值语义由 {@code RateLimiter} 自身定义，此处只给数值。 */
+    @Bean
+    public RateLimiter rateLimiter(
+            @Value("${tgg.guard.rate.window:PT10S}") Duration window,
+            @Value("${tgg.guard.rate.user:5}") int userThreshold,
+            @Value("${tgg.guard.rate.group:20}") int groupThreshold,
+            @Value("${tgg.guard.rate.global:100}") int globalThreshold) {
+        return new RateLimiter(new RateLimitPolicy(window, userThreshold, groupThreshold, globalThreshold));
+    }
+
+    /** 内容安全编排（链接 → 媒体 → 限流，首个命中即决胜）。 */
+    @Bean
+    public MessageGuardOrchestrator messageGuardOrchestrator(LinkFilter links, MediaFilter media,
+                                                             RateLimiter rate, Clock clock) {
+        return new MessageGuardOrchestrator(links, media, rate, clock);
+    }
+
+    /** 内容安全处置（命中 → 删消息 + 累计警告）。 */
+    @Bean
+    public MessageGuardService messageGuardService(MessageGuardOrchestrator guard,
+                                                   GroupAdminPort admin,
+                                                   WarningPort warnings) {
+        return new MessageGuardService(guard, admin, warnings);
+    }
+
+    private static List<String> splitCsv(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        return java.util.Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .toList();
+    }
+
     @Bean
     public BotDispatcher botDispatcher(TradeCommandHandler tradeHandler,
                                        BannedWordRegistry bannedWords,
                                        KeywordAutoReply autoReply,
                                        ModerationCommandHandler moderationHandler,
+                                       MessageGuardService guardService,
                                        @Value("${tgg.bot.username}") String botUsername) {
-        return new BotDispatcher(tradeHandler, botUsername, bannedWords, autoReply, moderationHandler);
+        return new BotDispatcher(tradeHandler, botUsername, bannedWords, autoReply, moderationHandler,
+                guardService);
     }
 
     @Bean

@@ -138,6 +138,18 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
         return IncomingMessage.MediaKind.NONE;
     }
 
+    /**
+     * 这条消息是否值得处理：有文本（命令/自动回复需要）<b>或</b>有媒体（内容安全过滤需要）。
+     *
+     * <p>此前只看 {@code hasText()}，于是带链接说明的纯图片/文件消息会整条被跳过——
+     * 媒体过滤永远没机会上场。放宽门禁正是让检测器能真正生效的前提之一。
+     */
+    private static boolean isProcessable(Message message) {
+        return message.hasText() || message.hasPhoto() || message.hasDocument()
+                || message.hasVideo() || message.hasAudio() || message.hasVoice()
+                || message.hasSticker() || message.hasVideoNote();
+    }
+
     @Override
     public void consume(Update update) {
         if (update == null) {
@@ -145,14 +157,13 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
         }
         String callbackId = update.hasCallbackQuery() ? update.getCallbackQuery().getId() : null;
         try {
-            if (update.hasMessage() && update.getMessage().hasText()) {
-                long chatId = update.getMessage().getChatId();
-                long userId = update.getMessage().getFrom() != null
-                        ? update.getMessage().getFrom().getId() : 0L;
+            if (update.hasMessage() && isProcessable(update.getMessage())) {
+                Message message = update.getMessage();
+                long chatId = message.getChatId();
+                long userId = message.getFrom() != null ? message.getFrom().getId() : 0L;
                 // 角色取自群内真实状态（查不到即退 MEMBER——权限只收紧不放松）
                 CommandActor actor = new CommandActor(userId, memberRolePort.roleOf(chatId, userId));
-                String text = update.getMessage().getText();
-                BotReply out = dispatcher.handle(chatId, text, actor);
+                BotReply out = dispatcher.handle(toIncoming(message), actor);
                 if (out != null && out.text() != null) {
                     if (out.offerWebApp() && webAppUrl != null && !webAppUrl.isBlank()) {
                         // 用法/帮助场景：附「打开表单」按钮，用户不必记命令语法

@@ -26,6 +26,7 @@ package com.tg.escrow;
 import com.tg.escrow.core.BannedWordRegistry;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.core.GroupAdminPort;
+import com.tg.escrow.core.IncomingMessage;
 import com.tg.escrow.core.KeywordAutoReply;
 import com.tg.escrow.core.MemberRole;
 import com.tg.escrow.core.MemberRolePort;
@@ -170,12 +171,61 @@ class BotDispatcherTest {
                         new com.tg.escrow.core.WarningPolicy(3, 5), orch, java.time.Duration.ofMinutes(10)));
     }
 
+    /**
+     * 本类不测内容安全路径——给个「永不命中」的 guard 让装配成形
+     * （判定与处置的覆盖在 MessageGuardOrchestratorTest / MessageGuardServiceTest）。
+     */
+    private static MessageGuardService noopGuard() {
+        return new MessageGuardService(
+                new com.tg.escrow.core.MessageGuardOrchestrator(
+                        new com.tg.escrow.core.LinkFilter(java.util.List.of(), java.util.List.of()),
+                        new com.tg.escrow.core.MediaFilter(java.util.Set.of(), java.util.Set.of()),
+                        new com.tg.escrow.core.RateLimiter(new com.tg.escrow.core.RateLimitPolicy(
+                                java.time.Duration.ofMinutes(1), 1000, 1000, 1000)),
+                        java.time.Clock.fixed(java.time.Instant.parse("2026-09-24T10:00:00Z"),
+                                java.time.ZoneOffset.UTC)),
+                new GroupAdminPort() {
+                    @Override
+                    public void kick(long guildId, long userId) {
+                    }
+
+                    @Override
+                    public void ban(long guildId, long userId) {
+                    }
+
+                    @Override
+                    public void mute(long guildId, long userId, java.time.Duration duration) {
+                    }
+
+                    @Override
+                    public void deleteMessage(long guildId, long messageId) {
+                    }
+                },
+                new com.tg.escrow.moderation.WarningPort() {
+                    @Override
+                    public int warn(long guildId, long userId) {
+                        return 1;
+                    }
+
+                    @Override
+                    public int countOf(long guildId, long userId) {
+                        return 0;
+                    }
+
+                    @Override
+                    public void clear(long guildId, long userId) {
+                    }
+                });
+    }
+
     private static BotDispatcher dispatcher(BannedWordRegistry registry) {
-        return new BotDispatcher(tradeHandler(), "mybot", registry, new KeywordAutoReply(), noopModeration());
+        return new BotDispatcher(tradeHandler(), "mybot", registry, new KeywordAutoReply(),
+                noopModeration(), noopGuard());
     }
 
     private static BotDispatcher dispatcher(KeywordAutoReply autoReply) {
-        return new BotDispatcher(tradeHandler(), "mybot", new BannedWordRegistry(), autoReply, noopModeration());
+        return new BotDispatcher(tradeHandler(), "mybot", new BannedWordRegistry(), autoReply,
+                noopModeration(), noopGuard());
     }
 
     private static BotDispatcher dispatcher() {
@@ -188,7 +238,8 @@ class BotDispatcherTest {
         KeywordAutoReply autoReply = new KeywordAutoReply();
         autoReply.register("怎么收费", "平台费默认 0%。");
 
-        BotReply reply = dispatcher(autoReply).handle(100L, "请问 怎么收费", ACTOR);
+        BotReply reply = dispatcher(autoReply).handle(
+                IncomingMessage.text(100L, ACTOR.userId(), 1L, "请问 怎么收费"), ACTOR);
 
         assertThat(reply.text()).isEqualTo("平台费默认 0%。");
         assertThat(reply.offerWebApp()).isFalse();
@@ -202,9 +253,10 @@ class BotDispatcherTest {
         BannedWordRegistry registry = new BannedWordRegistry();
         registry.reload(100L, List.of("广告词"), List.of());
 
-        BotDispatcher d = new BotDispatcher(tradeHandler(), "mybot", registry, autoReply, noopModeration());
+        BotDispatcher d = new BotDispatcher(tradeHandler(), "mybot", registry, autoReply,
+                noopModeration(), noopGuard());
 
-        BotReply reply = d.handle(100L, "看这个 广告词", ACTOR);
+        BotReply reply = d.handle(IncomingMessage.text(100L, ACTOR.userId(), 1L, "看这个 广告词"), ACTOR);
 
         assertThat(reply.text()).contains("违禁");
     }
@@ -212,7 +264,8 @@ class BotDispatcherTest {
     @Test
     @DisplayName("非命令消息（无违禁词）→ 不响应（返回 null）")
     void plainMessageGetsNoReply() {
-        assertThat(dispatcher().handle(100L, "大家好，这单怎么走", ACTOR)).isNull();
+        assertThat(dispatcher().handle(
+                IncomingMessage.text(100L, ACTOR.userId(), 1L, "大家好，这单怎么走"), ACTOR)).isNull();
     }
 
     @Test
@@ -221,7 +274,8 @@ class BotDispatcherTest {
         BannedWordRegistry registry = new BannedWordRegistry();
         registry.reload(100L, List.of("赌博广告"), List.of());
 
-        BotReply reply = dispatcher(registry).handle(100L, "这里有 赌博广告 快来", ACTOR);
+        BotReply reply = dispatcher(registry).handle(
+                IncomingMessage.text(100L, ACTOR.userId(), 1L, "这里有 赌博广告 快来"), ACTOR);
 
         assertThat(reply.text()).contains("违禁").contains("赌博广告");
     }
@@ -232,7 +286,8 @@ class BotDispatcherTest {
         BannedWordRegistry registry = new BannedWordRegistry();
         registry.reload(100L, List.of("赌博广告"), List.of());
 
-        assertThat(dispatcher(registry).handle(200L, "这里有 赌博广告", ACTOR)).isNull();
+        assertThat(dispatcher(registry).handle(
+                IncomingMessage.text(200L, ACTOR.userId(), 1L, "这里有 赌博广告"), ACTOR)).isNull();
     }
 
     @Test
@@ -240,8 +295,9 @@ class BotDispatcherTest {
     void escrowCommandRouted() {
         BotDispatcher d = dispatcher();
 
-        d.handle(100L, "/escrow create 2002 100 USDT", ACTOR);          // ET-34 必经的预览
-        BotReply reply = d.handle(100L, "/escrow confirm 2002 100 USDT", ACTOR);
+        d.handle(IncomingMessage.text(100L, ACTOR.userId(), 1L, "/escrow create 2002 100 USDT"), ACTOR);
+        BotReply reply = d.handle(
+                IncomingMessage.text(100L, ACTOR.userId(), 2L, "/escrow confirm 2002 100 USDT"), ACTOR);
 
         assertThat(reply.text()).contains("已创建订单");
         assertThat(reply.offerWebApp()).isFalse();   // 正常落单回执不带表单按钮
@@ -250,7 +306,8 @@ class BotDispatcherTest {
     @Test
     @DisplayName("裸 /escrow（无子命令）→ 用法回执且引导表单（Wave 3：用户不必记命令语法）")
     void bareEscrowOffersWebAppForm() {
-        BotReply reply = dispatcher().handle(100L, "/escrow", ACTOR);
+        BotReply reply = dispatcher().handle(
+                IncomingMessage.text(100L, ACTOR.userId(), 1L, "/escrow"), ACTOR);
 
         assertThat(reply.text()).isEqualTo(TradeCommandHandler.USAGE);
         assertThat(reply.offerWebApp()).isTrue();
@@ -259,7 +316,8 @@ class BotDispatcherTest {
     @Test
     @DisplayName("其它命令 → 帮助回执（含用法）")
     void unknownCommandGetsHelp() {
-        BotReply reply = dispatcher().handle(100L, "/whatever", ACTOR);
+        BotReply reply = dispatcher().handle(
+                IncomingMessage.text(100L, ACTOR.userId(), 1L, "/whatever"), ACTOR);
 
         assertThat(reply.text()).contains("escrow").contains("用法");
         assertThat(reply.offerWebApp()).isTrue();   // 帮助场景引导去表单
@@ -268,7 +326,43 @@ class BotDispatcherTest {
     @Test
     @DisplayName("@botname 后缀：发给别的 bot 的命令不响应")
     void commandForOtherBotIgnored() {
-        assertThat(dispatcher().handle(100L, "/escrow@otherbot confirm 2002 100 USDT", ACTOR)).isNull();
+        assertThat(dispatcher().handle(
+                IncomingMessage.text(100L, ACTOR.userId(), 1L, "/escrow@otherbot confirm 2002 100 USDT"),
+                ACTOR)).isNull();
+    }
+
+    @Test
+    @DisplayName("【接线证据】非命令消息带可疑链接 → 经分发器真的被删（不只是服务层能跑）")
+    void guardRunsOnNonCommandMessages() {
+        MessageGuardServiceTest.RecordingAdmin admin = new MessageGuardServiceTest.RecordingAdmin();
+        MessageGuardServiceTest.RecordingWarnings warnings =
+                new MessageGuardServiceTest.RecordingWarnings();
+        BotDispatcher d = new BotDispatcher(tradeHandler(), "mybot", new BannedWordRegistry(),
+                new KeywordAutoReply(), noopModeration(), blockingGuard(admin, warnings));
+
+        BotReply reply = d.handle(IncomingMessage.text(100L, ACTOR.userId(), 55L,
+                "领奖 http://evil.example/x"), ACTOR);
+
+        assertThat(admin.calls)
+                .as("若分发器没把消息交给 guard，这里会是空——那正是本波要修的断裂")
+                .containsExactly("del:100:55");
+        assertThat(warnings.calls).hasSize(1);
+        assertThat(reply.text()).contains("已被删除");
+    }
+
+    /** 会真的拦下可疑链接的 guard（白名单只放行 good.example）。 */
+    private static MessageGuardService blockingGuard(MessageGuardServiceTest.RecordingAdmin admin,
+                                                     MessageGuardServiceTest.RecordingWarnings warnings) {
+        return new MessageGuardService(
+                new com.tg.escrow.core.MessageGuardOrchestrator(
+                        new com.tg.escrow.core.LinkFilter(java.util.List.of("good.example"),
+                                java.util.List.of("t.cn")),
+                        new com.tg.escrow.core.MediaFilter(java.util.Set.of(), java.util.Set.of()),
+                        new com.tg.escrow.core.RateLimiter(new com.tg.escrow.core.RateLimitPolicy(
+                                java.time.Duration.ofMinutes(1), 100, 100, 100)),
+                        java.time.Clock.fixed(java.time.Instant.parse("2026-09-24T10:00:00Z"),
+                                java.time.ZoneOffset.UTC)),
+                admin, warnings);
     }
 
     @Test
@@ -276,7 +370,9 @@ class BotDispatcherTest {
     void nullsGetNoReply() {
         BotDispatcher d = dispatcher();
 
-        assertThat(d.handle(100L, null, ACTOR)).isNull();
-        assertThat(d.handle(100L, "/escrow confirm 2002 100 USDT", null)).isNull();
+        assertThat(d.handle(IncomingMessage.text(100L, ACTOR.userId(), 1L, null), ACTOR)).isNull();
+        assertThat(d.handle(
+                IncomingMessage.text(100L, ACTOR.userId(), 1L, "/escrow confirm 2002 100 USDT"), null))
+                .isNull();
     }
 }

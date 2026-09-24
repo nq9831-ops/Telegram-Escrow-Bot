@@ -220,7 +220,33 @@ class TelegramBotHandlerTest {
                         (chatId, userId) -> com.tg.escrow.core.MemberRole.MEMBER, noWarnings,
                         new com.tg.escrow.core.WarningOrchestrator(
                                 new com.tg.escrow.core.WarningPolicy(3, 5), orch,
-                                java.time.Duration.ofMinutes(10))));
+                                java.time.Duration.ofMinutes(10))),
+                new MessageGuardService(
+                        new com.tg.escrow.core.MessageGuardOrchestrator(
+                                new com.tg.escrow.core.LinkFilter(java.util.List.of(), java.util.List.of()),
+                                new com.tg.escrow.core.MediaFilter(java.util.Set.of(), java.util.Set.of()),
+                                new com.tg.escrow.core.RateLimiter(new com.tg.escrow.core.RateLimitPolicy(
+                                        java.time.Duration.ofMinutes(1), 1000, 1000, 1000)),
+                                java.time.Clock.fixed(java.time.Instant.parse("2026-09-24T10:00:00Z"),
+                                        java.time.ZoneOffset.UTC)),
+                        new com.tg.escrow.core.GroupAdminPort() {
+                            @Override
+                            public void kick(long guildId, long userId) {
+                            }
+
+                            @Override
+                            public void ban(long guildId, long userId) {
+                            }
+
+                            @Override
+                            public void mute(long guildId, long userId, java.time.Duration duration) {
+                            }
+
+                            @Override
+                            public void deleteMessage(long guildId, long messageId) {
+                            }
+                        },
+                        noWarnings));
         return new TelegramBotHandler(BotTokenConfig.from(k -> "123456:TESTTOKEN"), dispatcher,
                 reply, "mybot", webAppUrl,
                 (chatId, userId) -> com.tg.escrow.core.MemberRole.MEMBER);

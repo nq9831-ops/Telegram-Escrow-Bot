@@ -60,78 +60,100 @@ public final class BotDispatcher {
     private final BannedWordRegistry bannedWords;
     private final KeywordAutoReply autoReply;
     private final ModerationCommandHandler moderationHandler;
+    private final MessageGuardService guardService;
 
     /**
      * @param tradeHandler      交易命令处理器
      * @param botUsername       本 bot 用户名（不含 {@code @}）
      * @param bannedWords       违禁词注册表
      * @param autoReply         自动回复（GM-17 的生产消费者）
-     * @param moderationHandler 群管理命令处理器（Wave 3：/kick /ban /mute /del）
+     * @param moderationHandler 群管理命令处理器（/kick /ban /mute /del /warn /unwarn）
+     * @param guardService      内容安全处置（链接/媒体/限流 → 删消息 + 累计警告）
      */
     public BotDispatcher(TradeCommandHandler tradeHandler, String botUsername,
                          BannedWordRegistry bannedWords, KeywordAutoReply autoReply,
-                         ModerationCommandHandler moderationHandler) {
+                         ModerationCommandHandler moderationHandler,
+                         MessageGuardService guardService) {
         if (tradeHandler == null || bannedWords == null || autoReply == null) {
             throw new TggException("命令分发：处理器/违禁词注册表/自动回复均不可为空");
         }
         if (moderationHandler == null) {
             throw new TggException("命令分发：群管理命令处理器不可为空");
         }
+        if (guardService == null) {
+            throw new TggException("命令分发：内容安全处置不可为空");
+        }
         this.tradeHandler = tradeHandler;
         this.botUsername = botUsername;
         this.bannedWords = bannedWords;
         this.autoReply = autoReply;
         this.moderationHandler = moderationHandler;
+        this.guardService = guardService;
     }
 
     /**
-     * 处理一条消息文本。
+     * 处理一条入站消息——<b>唯一入口</b>。
      *
-     * @param chatId 会话/群 ID（违禁词按群取词库）
-     * @param text   消息文本
-     * @param actor  发起人
-     * @return 回执（正文 + 是否附「打开表单」入口）；{@code null} 表示<b>不响应</b>
-     */
-    /**
-     * 入站消息重载（Wave 2）：把消息元信息（消息号/媒体/文件名）带下来，供内容安全判定使用。
+     * <p>刻意<b>不</b>提供「只吃文本」的重载：内容安全判定需要消息号（删消息）与媒体信息，
+     * 一个拿不到这些的入口会变成绕过安全判定的旁路。要处理消息，就给整条消息。
      *
-     * <p>命令与自动回复都只需要文本，故当前委托到旧签名；内容安全判定在下一波接入此处。
-     * 之所以现在就把重载立起来：检测器需要消息号（删消息）与媒体信息，而旧签名根本拿不到——
-     * 这正是那三个守卫此前零引用的原因。
+     * <p>路由顺序（定死）：命令 → 违禁词 → 内容安全（链接/媒体/限流）→ 自动回复。
+     * 安全动作一律排在应答之前——一条带钓鱼链接的消息不该先看到欢迎语。
+     *
+     * @param message 入站消息
+     * @param actor   发起人（角色取自群内真实状态）
+     * @return 回执；{@code null} 表示<b>不响应</b>
      */
     public BotReply handle(IncomingMessage message, CommandActor actor) {
-        if (message == null) {
-            throw new TggException("命令分发：消息不可为空");
-        }
-        return handle(message.chatId(), message.text(), actor);
-    }
-
-    public BotReply handle(long chatId, String text, CommandActor actor) {
-        if (text == null || actor == null) {
+        if (message == null || actor == null) {
             return null;
         }
-        Optional<com.tg.escrow.core.BotCommand> parsed = CommandParser.parse(text, botUsername);
-        if (parsed.isPresent()) {
-            com.tg.escrow.core.BotCommand cmd = parsed.get();
-            // 处置命令优先：安全动作不该排队在业务应答之后（与违禁词优先同一取向）
-            if (moderationHandler.canHandle(cmd)) {
-                return BotReply.plain(moderationHandler.handle(cmd, actor, chatId));
+        long chatId = message.chatId();
+        String text = message.text();
+        boolean hasText = text != null && !text.isBlank();
+
+        if (hasText) {
+            Optional<com.tg.escrow.core.BotCommand> parsed = CommandParser.parse(text, botUsername);
+            if (parsed.isPresent()) {
+                return handleCommand(parsed.get(), actor, chatId);
             }
-            if (tradeHandler.canHandle(cmd)) {
-                String reply = tradeHandler.handle(cmd, actor);
-                // "/escrow" 无子命令或参数不全 → 用法说明：正是该引导用户去表单的时刻
-                return TradeCommandHandler.USAGE.equals(reply)
-                        ? BotReply.withWebApp(reply)
-                        : BotReply.plain(reply);
+            // 1) 违禁词优先（安全 > 应答）
+            Optional<BannedWordMatcher.Match> hit = bannedWords.firstMatch(chatId, text);
+            if (hit.isPresent()) {
+                return BotReply.plain("⚠️ 消息含违禁内容（命中规则：" + hit.get().rule() + "），请文明交流。");
             }
-            return BotReply.withWebApp(HELP);
         }
-        // 1) 违禁词优先（安全 > 应答）
-        Optional<BannedWordMatcher.Match> hit = bannedWords.firstMatch(chatId, text);
-        if (hit.isPresent()) {
-            return BotReply.plain("⚠️ 消息含违禁内容（命中规则：" + hit.get().rule() + "），请文明交流。");
+
+        // 2) 内容安全（链接/媒体/限流）——排在自动回复之前
+        try {
+            Optional<String> screened = guardService.screen(message);
+            if (screened.isPresent()) {
+                return BotReply.plain(screened.get());
+            }
+        } catch (TggException ex) {
+            // 处置失败必须让上层知道——吞掉会让人以为消息已被清理
+            return BotReply.plain("⚠️ 内容安全处置失败：" + ex.getMessage());
         }
-        // 2) 自动回复
+
+        // 3) 自动回复（仅文本消息）
+        if (!hasText) {
+            return null;
+        }
         return autoReply.replyFor(text).map(BotReply::plain).orElse(null);
+    }
+
+    /** 命令路由：处置命令优先于业务命令（安全动作不该排队在业务应答之后）。 */
+    private BotReply handleCommand(com.tg.escrow.core.BotCommand cmd, CommandActor actor, long chatId) {
+        if (moderationHandler.canHandle(cmd)) {
+            return BotReply.plain(moderationHandler.handle(cmd, actor, chatId));
+        }
+        if (tradeHandler.canHandle(cmd)) {
+            String reply = tradeHandler.handle(cmd, actor);
+            // "/escrow" 无子命令或参数不全 → 用法说明：正是该引导用户去表单的时刻
+            return TradeCommandHandler.USAGE.equals(reply)
+                    ? BotReply.withWebApp(reply)
+                    : BotReply.plain(reply);
+        }
+        return BotReply.withWebApp(HELP);
     }
 }
