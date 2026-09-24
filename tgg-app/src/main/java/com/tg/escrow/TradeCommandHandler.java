@@ -28,12 +28,15 @@ import com.tg.escrow.common.TggException;
 import com.tg.escrow.core.BotCommand;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.escrow.AmountTierPolicy;
+import com.tg.escrow.escrow.EscrowOrder;
+import com.tg.escrow.escrow.EscrowOrderLookupPort;
 import com.tg.escrow.escrow.EscrowTradeService;
 import com.tg.escrow.escrow.PendingTradeRegistry;
 import com.tg.escrow.escrow.RiskPrompt;
 import com.tg.escrow.escrow.TradeAdmissionDecision;
 import com.tg.escrow.escrow.TradeInitiationRequest;
 import com.tg.escrow.escrow.TradeInitiationResult;
+import com.tg.escrow.escrow.TradeStatusView;
 
 import java.math.BigDecimal;
 
@@ -60,21 +63,25 @@ public final class TradeCommandHandler {
     private static final String COMMAND = "escrow";
     private static final String SUB_CREATE = "create";
     private static final String SUB_CONFIRM = "confirm";
+    private static final String SUB_STATUS = "status";
     private static final String USAGE = "用法：/escrow create <卖方ID> <金额> <币种> 预览风险；"
-            + "确认后发 /escrow confirm <卖方ID> <金额> <币种> 创建交易";
+            + "确认后发 /escrow confirm <卖方ID> <金额> <币种> 创建交易；"
+            + "/escrow status <订单号> 查询订单状态";
 
     private final EscrowTradeService service;
     private final AmountTierPolicy tierPolicy;
     private final PendingTradeRegistry pending;
+    private final EscrowOrderLookupPort lookup;
 
     public TradeCommandHandler(EscrowTradeService service, AmountTierPolicy tierPolicy,
-                               PendingTradeRegistry pending) {
-        if (service == null || tierPolicy == null || pending == null) {
-            throw new TggException("命令处理：交易服务、金额分层策略与待确认登记均不可为空");
+                               PendingTradeRegistry pending, EscrowOrderLookupPort lookup) {
+        if (service == null || tierPolicy == null || pending == null || lookup == null) {
+            throw new TggException("命令处理：交易服务、金额分层策略、待确认登记与订单查询端口均不可为空");
         }
         this.service = service;
         this.tierPolicy = tierPolicy;
         this.pending = pending;
+        this.lookup = lookup;
     }
 
     /** 本处理器是否管辖该命令。 */
@@ -99,6 +106,12 @@ public final class TradeCommandHandler {
         }
 
         String sub = cmd.argOpt(0).orElse(null);
+
+        // T2 状态查询：只吃订单号，不走 create/confirm 那套买卖双方的参数解析
+        if (SUB_STATUS.equals(sub)) {
+            return handleStatus(cmd);
+        }
+
         if (!SUB_CREATE.equals(sub) && !SUB_CONFIRM.equals(sub)) {
             return USAGE;
         }
@@ -148,6 +161,26 @@ public final class TradeCommandHandler {
                 ? "暂无法预估"
                 : decision.retryAfter().toString();
         return "被拒：" + reasonText(decision.reason()) + "，可重试：" + retry;
+    }
+
+    /**
+     * T2 状态查询：订单号 → 用户可读状态视图。
+     *
+     * <p>查不到<b>不是错误</b>——按用户视角回「不存在」，而不是抛异常或空响应。
+     * 视图文案本身不含买卖双方 ID 与金额（{@link TradeStatusView} 的既定约束），
+     * 因此可安全地回在群聊里。
+     */
+    private String handleStatus(BotCommand cmd) {
+        Long orderId = parseLong(cmd.argOpt(1).orElse(null));
+        if (orderId == null) {
+            return USAGE;
+        }
+        return lookup.byId(orderId)
+                .map(EscrowOrder::currentState)
+                .map(TradeStatusView::of)
+                .map(view -> "订单 #" + orderId + "：" + view.summary()
+                        + "\n下一步：" + view.nextStep())
+                .orElse("订单 #" + orderId + " 不存在（请核对订单号）");
     }
 
     private static String reasonText(TradeAdmissionDecision.Reason reason) {

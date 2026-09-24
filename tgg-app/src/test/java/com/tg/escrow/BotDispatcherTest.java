@@ -77,7 +77,8 @@ class BotDispatcherTest {
         return new TradeCommandHandler(
                 new EscrowTradeService(gate, history, new InMemoryStore(), clock),
                 new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
-                new PendingTradeRegistry(Duration.ofMinutes(10), clock));
+                new PendingTradeRegistry(Duration.ofMinutes(10), clock),
+                orderId -> java.util.Optional.empty());   // 本类不测 T2 查询，stub 即可
     }
 
     private static BotDispatcher dispatcher(BannedWordRegistry registry) {

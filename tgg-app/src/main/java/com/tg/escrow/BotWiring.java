@@ -26,9 +26,11 @@ package com.tg.escrow;
 import com.tg.escrow.core.BannedWordRegistry;
 import com.tg.escrow.core.KeywordAutoReply;
 import com.tg.escrow.escrow.AmountTierPolicy;
+import com.tg.escrow.escrow.EscrowOrderLookupPort;
 import com.tg.escrow.escrow.EscrowOrderRepository;
 import com.tg.escrow.escrow.EscrowOrderStore;
 import com.tg.escrow.escrow.EscrowTradeService;
+import com.tg.escrow.escrow.JpaEscrowOrderLookup;
 import com.tg.escrow.escrow.JpaEscrowOrderStore;
 import com.tg.escrow.escrow.JpaTradeHistoryPort;
 import com.tg.escrow.escrow.PendingTradeRegistry;
@@ -96,6 +98,12 @@ public class BotWiring {
         return new JpaTradeHistoryPort(repository);
     }
 
+    /** T2 状态查询的读侧端口（与落单出口分开，见端口文档）。 */
+    @Bean
+    public EscrowOrderLookupPort escrowOrderLookupPort(EscrowOrderRepository repository) {
+        return new JpaEscrowOrderLookup(repository);
+    }
+
     @Bean
     public EscrowTradeService escrowTradeService(TradeAdmissionGate gate, TradeHistoryPort history,
                                                  EscrowOrderStore store, Clock clock) {
@@ -105,8 +113,9 @@ public class BotWiring {
     @Bean
     public TradeCommandHandler tradeCommandHandler(EscrowTradeService service,
                                                    AmountTierPolicy tierPolicy,
-                                                   PendingTradeRegistry pending) {
-        return new TradeCommandHandler(service, tierPolicy, pending);
+                                                   PendingTradeRegistry pending,
+                                                   EscrowOrderLookupPort lookup) {
+        return new TradeCommandHandler(service, tierPolicy, pending, lookup);
     }
 
     /** GM-17 自动回复（空规则表；上线后由管理端注册关键词）。 */

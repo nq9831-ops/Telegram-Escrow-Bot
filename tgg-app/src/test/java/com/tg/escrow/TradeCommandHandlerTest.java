@@ -29,6 +29,7 @@ import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.core.MemberRole;
 import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowOrder;
+import com.tg.escrow.escrow.EscrowOrderLookupPort;
 import com.tg.escrow.escrow.EscrowOrderStore;
 import com.tg.escrow.escrow.EscrowTradeService;
 import com.tg.escrow.escrow.PendingTradeRegistry;
@@ -64,14 +65,24 @@ class TradeCommandHandlerTest {
     private static final CommandActor ACTOR = new CommandActor(BUYER, MemberRole.MEMBER);
     private static final Duration PENDING_TTL = Duration.ofMinutes(10);
 
-    /** 内存订单存储：回填自增 id，替代 JPA（无需 Spring 上下文）。 */
-    private static final class InMemoryStore implements EscrowOrderStore {
+    /**
+     * 内存订单存储 + 查询端口：回填自增 id 并留档，替代 JPA（无需 Spring 上下文）。
+     * 同时实现 {@link EscrowOrderLookupPort}，让 T2 状态查询走真实查询路径而非特判。
+     */
+    private static final class InMemoryStore implements EscrowOrderStore, EscrowOrderLookupPort {
+        private final java.util.Map<Long, EscrowOrder> byId = new java.util.HashMap<>();
         private long seq;
 
         @Override
         public EscrowOrder save(EscrowOrder order) {
             order.assignId(++seq);
+            byId.put(order.getId(), order);
             return order;
+        }
+
+        @Override
+        public java.util.Optional<EscrowOrder> byId(long orderId) {
+            return java.util.Optional.ofNullable(byId.get(orderId));
         }
     }
 
@@ -83,6 +94,10 @@ class TradeCommandHandlerTest {
         return new BotCommand("escrow", List.of("confirm", seller, amount, currency));
     }
 
+    private static BotCommand statusCmd(String orderId) {
+        return new BotCommand("escrow", List.of("status", orderId));
+    }
+
     /** 用真实 gate + 真实 service + 真实 registry 装配 handler。ctx 决定门禁看到的事实。 */
     private static TradeCommandHandler handler(int maxConcurrent, Duration cooldown,
                                                TradeAdmissionContext ctx) {
@@ -91,10 +106,12 @@ class TradeCommandHandlerTest {
         TradeHistoryPort history = id -> new TradeAdmissionContext(
                 id, ctx.activeTradeCount(), ctx.lastCompletedTradeAt(), ctx.hasUnresolvedDispute());
         Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
+        InMemoryStore store = new InMemoryStore();
         return new TradeCommandHandler(
-                new EscrowTradeService(gate, history, new InMemoryStore(), clock),
+                new EscrowTradeService(gate, history, store, clock),
                 new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
-                new PendingTradeRegistry(PENDING_TTL, clock));
+                new PendingTradeRegistry(PENDING_TTL, clock),
+                store);
     }
 
     private static TradeAdmissionContext clean() {
@@ -230,5 +247,36 @@ class TradeCommandHandlerTest {
 
         assertThatThrownBy(() -> h.handle(new BotCommand("ban", List.of()), ACTOR))
                 .isInstanceOf(TggException.class);
+    }
+
+    @Test
+    @DisplayName("T2 状态查询：命中订单 → 回订单号 + 状态摘要 + 下一步")
+    void statusReturnsView() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        h.handle(createCmd("2002", "100", "USDT"), ACTOR);
+        h.handle(confirmCmd("2002", "100", "USDT"), ACTOR);   // 落单 #1（OPEN）
+
+        String out = h.handle(statusCmd("1"), ACTOR);
+
+        assertThat(out).contains("#1").contains("订单已创建").contains("卖方确认接单");
+    }
+
+    @Test
+    @DisplayName("T2 状态查询：订单不存在 → 明说找不到（不报错、不空响应）")
+    void statusUnknownOrder() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+
+        String out = h.handle(statusCmd("999"), ACTOR);
+
+        assertThat(out).contains("不存在");
+    }
+
+    @Test
+    @DisplayName("T2 状态查询：订单号缺失或非数字 → 用法说明")
+    void statusBadArgs() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+
+        assertThat(h.handle(new BotCommand("escrow", List.of("status")), ACTOR)).contains("用法");
+        assertThat(h.handle(statusCmd("abc"), ACTOR)).contains("用法");
     }
 }
