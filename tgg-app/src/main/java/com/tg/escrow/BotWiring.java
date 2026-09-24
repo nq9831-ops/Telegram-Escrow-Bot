@@ -110,6 +110,15 @@ public class BotWiring {
         return new EscrowTradeService(gate, history, store, clock);
     }
 
+    /** Mini App initData 验签器（安全命门：不验签则任何人可伪造身份调交易 API）。 */
+    @Bean
+    public com.tg.escrow.webapp.WebAppInitDataVerifier webAppInitDataVerifier(
+            BotTokenConfig tokenConfig,
+            @Value("${tgg.webapp.initdata.max-age:PT1H}") Duration maxAge,
+            Clock clock) {
+        return new com.tg.escrow.webapp.WebAppInitDataVerifier(tokenConfig.token(), maxAge, clock);
+    }
+
     @Bean
     public TradeCommandHandler tradeCommandHandler(EscrowTradeService service,
                                                    AmountTierPolicy tierPolicy,
