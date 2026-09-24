@@ -24,12 +24,14 @@
 package com.tg.escrow;
 
 import com.tg.escrow.core.BannedWordRegistry;
-import com.tg.escrow.core.BotCommand;
 import com.tg.escrow.core.CommandActor;
+import com.tg.escrow.core.KeywordAutoReply;
 import com.tg.escrow.core.MemberRole;
+import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowOrder;
 import com.tg.escrow.escrow.EscrowOrderStore;
 import com.tg.escrow.escrow.EscrowTradeService;
+import com.tg.escrow.escrow.PendingTradeRegistry;
 import com.tg.escrow.escrow.TradeAdmissionContext;
 import com.tg.escrow.escrow.TradeAdmissionGate;
 import com.tg.escrow.escrow.TradeAdmissionPolicy;
@@ -37,6 +39,7 @@ import com.tg.escrow.escrow.TradeHistoryPort;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -49,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * Bot 命令分发器（S1 命令路由 + GM-06 违禁词接线）的行为固定测试。
  *
  * <p>路由：非命令 → 违禁词检查（<b>命中给出处置回执</b>——热更新词库的真实生产消费者）→
- * 不命中不响应；escrow 命令 → 交易处理器；其它命令 → 帮助。
+ * 不命中不响应；escrow 命令 → 交易处理器（两步流：create 预览 → confirm 落单）；其它命令 → 帮助。
  */
 class BotDispatcherTest {
 
@@ -66,24 +69,23 @@ class BotDispatcherTest {
         }
     }
 
-    private static BotDispatcher dispatcher(BannedWordRegistry registry) {
+    /** 真实 service + 真实 registry 的交易处理器（不 mock 中间层）。 */
+    private static TradeCommandHandler tradeHandler() {
         TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
         TradeHistoryPort history = id -> new TradeAdmissionContext(id, 0, null, false);
-        EscrowTradeService service = new EscrowTradeService(gate, history,
-                new InMemoryStore(), Clock.fixed(T0, ZoneOffset.UTC));
-        return new BotDispatcher(new TradeCommandHandler(service, new com.tg.escrow.escrow.AmountTierPolicy(
-                        new java.math.BigDecimal("100"), new java.math.BigDecimal("1000"))),
-                "mybot", registry, new com.tg.escrow.core.KeywordAutoReply());
+        Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
+        return new TradeCommandHandler(
+                new EscrowTradeService(gate, history, new InMemoryStore(), clock),
+                new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
+                new PendingTradeRegistry(Duration.ofMinutes(10), clock));
     }
 
-    private static BotDispatcher dispatcher(com.tg.escrow.core.KeywordAutoReply autoReply) {
-        TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
-        TradeHistoryPort history = id -> new TradeAdmissionContext(id, 0, null, false);
-        EscrowTradeService service = new EscrowTradeService(gate, history,
-                new InMemoryStore(), Clock.fixed(T0, ZoneOffset.UTC));
-        return new BotDispatcher(new TradeCommandHandler(service, new com.tg.escrow.escrow.AmountTierPolicy(
-                        new java.math.BigDecimal("100"), new java.math.BigDecimal("1000"))),
-                "mybot", new BannedWordRegistry(), autoReply);
+    private static BotDispatcher dispatcher(BannedWordRegistry registry) {
+        return new BotDispatcher(tradeHandler(), "mybot", registry, new KeywordAutoReply());
+    }
+
+    private static BotDispatcher dispatcher(KeywordAutoReply autoReply) {
+        return new BotDispatcher(tradeHandler(), "mybot", new BannedWordRegistry(), autoReply);
     }
 
     private static BotDispatcher dispatcher() {
@@ -93,7 +95,7 @@ class BotDispatcherTest {
     @Test
     @DisplayName("自动回复：普通消息命中关键词 → 返回预设回复（KeywordAutoReply 的生产消费者）")
     void autoReplyHit() {
-        com.tg.escrow.core.KeywordAutoReply autoReply = new com.tg.escrow.core.KeywordAutoReply();
+        KeywordAutoReply autoReply = new KeywordAutoReply();
         autoReply.register("怎么收费", "平台费默认 0%。");
 
         String reply = dispatcher(autoReply).handle(100L, "请问 怎么收费", ACTOR);
@@ -104,18 +106,12 @@ class BotDispatcherTest {
     @Test
     @DisplayName("违禁词优先于自动回复（同时命中给处置回执）")
     void bannedWordBeatsAutoReply() {
-        com.tg.escrow.core.KeywordAutoReply autoReply = new com.tg.escrow.core.KeywordAutoReply();
+        KeywordAutoReply autoReply = new KeywordAutoReply();
         autoReply.register("广告词", "自动回复");
         BannedWordRegistry registry = new BannedWordRegistry();
-        registry.reload(100L, java.util.List.of("广告词"), java.util.List.of());
-        com.tg.escrow.core.KeywordAutoReply unused = autoReply; // 同名关键词场景
-        TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
-        TradeHistoryPort history = id -> new TradeAdmissionContext(id, 0, null, false);
-        EscrowTradeService service = new EscrowTradeService(gate, history,
-                new InMemoryStore(), Clock.fixed(T0, ZoneOffset.UTC));
-        BotDispatcher d = new BotDispatcher(new TradeCommandHandler(service,
-                new com.tg.escrow.escrow.AmountTierPolicy(new java.math.BigDecimal("100"),
-                        new java.math.BigDecimal("1000"))), "mybot", registry, unused);
+        registry.reload(100L, List.of("广告词"), List.of());
+
+        BotDispatcher d = new BotDispatcher(tradeHandler(), "mybot", registry, autoReply);
 
         String reply = d.handle(100L, "看这个 广告词", ACTOR);
 
@@ -149,9 +145,12 @@ class BotDispatcherTest {
     }
 
     @Test
-    @DisplayName("escrow 命令 → 路由到交易处理器，回执含订单号")
+    @DisplayName("escrow 命令 → 路由到交易处理器：先 create 预览、再 confirm，回执含订单号")
     void escrowCommandRouted() {
-        String reply = dispatcher().handle(100L, "/escrow confirm 2002 100 USDT", ACTOR);
+        BotDispatcher d = dispatcher();
+
+        d.handle(100L, "/escrow create 2002 100 USDT", ACTOR);          // ET-34 必经的预览
+        String reply = d.handle(100L, "/escrow confirm 2002 100 USDT", ACTOR);
 
         assertThat(reply).contains("已创建订单");
     }

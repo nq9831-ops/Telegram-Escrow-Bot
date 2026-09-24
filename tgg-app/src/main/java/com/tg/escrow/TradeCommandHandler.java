@@ -29,6 +29,7 @@ import com.tg.escrow.core.BotCommand;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowTradeService;
+import com.tg.escrow.escrow.PendingTradeRegistry;
 import com.tg.escrow.escrow.RiskPrompt;
 import com.tg.escrow.escrow.TradeAdmissionDecision;
 import com.tg.escrow.escrow.TradeInitiationRequest;
@@ -37,17 +38,22 @@ import com.tg.escrow.escrow.TradeInitiationResult;
 import java.math.BigDecimal;
 
 /**
- * 交易命令处理器（S2 / T1 收口）——两步流：<b>create 预览风险提示（ET-34 创建前强制展示），
- * confirm 真正落单</b>。
+ * 交易命令处理器（S2 / T1 收口）——两步流：<b>create 预览风险提示（ET-34），confirm 校验前置后落单</b>。
  *
- * <h2>为什么两步</h2>
- * <p>ET-34 要求"创建交易前<b>强制</b>展示风险提示"——一步创建只算"创建后提示"，
- * 挡不住手滑。两步流把提示变成必经环节：{@code create} 不落单、只回风险提示与确认用法；
- * {@code confirm} 才调 {@link EscrowTradeService#initiate}。
+ * <h2>为什么两步、且 confirm 必须命中前置</h2>
+ * <p>ET-34 要求"创建交易前<b>强制</b>展示风险提示"。仅靠文案不够——用户若直接发
+ * {@code confirm}，就跳过了与自己金额相关的那条提示（手滑/记错场景）。因此 {@code create}
+ * 把请求登记进 {@link PendingTradeRegistry}，{@code confirm} 必须命中同一笔登记才落单；
+ * 未预览、参数已改或登记过期，一律退回"先预览"。
  *
  * <h2>被拒回执</h2>
  * <p>含拒绝原因与可重试时刻（无法预估时明说"暂无法预估"）——被拒是正常业务结果，
  * 用户必须知道"为什么"和"何时能再来"。
+ *
+ * <h2>异常防护对称</h2>
+ * <p>{@code create} 与 {@code confirm} 都先把参数装配成 {@link TradeInitiationRequest}
+ * （自交易、非正金额等事实错误在此拦下），两侧的失败一律转成"无法创建：&lt;原因&gt;"，
+ * 不让底层异常冒成无回执。
  */
 public final class TradeCommandHandler {
 
@@ -59,13 +65,16 @@ public final class TradeCommandHandler {
 
     private final EscrowTradeService service;
     private final AmountTierPolicy tierPolicy;
+    private final PendingTradeRegistry pending;
 
-    public TradeCommandHandler(EscrowTradeService service, AmountTierPolicy tierPolicy) {
-        if (service == null || tierPolicy == null) {
-            throw new TggException("命令处理：交易服务与金额分层策略均不可为空");
+    public TradeCommandHandler(EscrowTradeService service, AmountTierPolicy tierPolicy,
+                               PendingTradeRegistry pending) {
+        if (service == null || tierPolicy == null || pending == null) {
+            throw new TggException("命令处理：交易服务、金额分层策略与待确认登记均不可为空");
         }
         this.service = service;
         this.tierPolicy = tierPolicy;
+        this.pending = pending;
     }
 
     /** 本处理器是否管辖该命令。 */
@@ -101,17 +110,31 @@ public final class TradeCommandHandler {
             return USAGE;
         }
 
+        // 参数先装配成请求：自交易 / 非正金额等事实错误在两侧一致地被拦下（异常防护对称）
+        TradeInitiationRequest request;
+        try {
+            request = new TradeInitiationRequest(actor.userId(), sellerId, amount, currency);
+        } catch (EscrowException ex) {
+            return "无法创建：" + ex.getMessage();
+        }
+
         if (SUB_CREATE.equals(sub)) {
-            // ET-34：创建前强制展示风险提示——本分支不落单
-            String prompt = RiskPrompt.forAmount(amount, tierPolicy);
+            // ET-34：创建前强制展示风险提示——登记待确认请求，本分支不落单
+            pending.prepare(request);
+            String prompt = RiskPrompt.forAmount(request.amount(), tierPolicy);
             return "⚠️ 交易前风险提示：" + prompt
-                    + "\n确认无误请发：/escrow confirm " + sellerId + " " + amount + " " + currency;
+                    + "\n确认无误请发：/escrow confirm " + request.sellerId() + " "
+                    + request.amount() + " " + request.currency();
+        }
+
+        if (pending.consume(request).isEmpty()) {
+            // 未预览 / 参数已改 / 登记过期：风险提示不可绕过
+            return "请先预览风险提示再确认（未预览、参数已变或超过有效期）：\n" + USAGE;
         }
 
         TradeInitiationResult result;
         try {
-            result = service.initiate(
-                    new TradeInitiationRequest(actor.userId(), sellerId, amount, currency));
+            result = service.initiate(request);
         } catch (EscrowException ex) {
             return "无法创建：" + ex.getMessage();
         }

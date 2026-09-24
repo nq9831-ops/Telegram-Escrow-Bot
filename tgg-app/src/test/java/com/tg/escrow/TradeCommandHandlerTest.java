@@ -27,9 +27,11 @@ import com.tg.escrow.common.TggException;
 import com.tg.escrow.core.BotCommand;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.core.MemberRole;
+import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowOrder;
 import com.tg.escrow.escrow.EscrowOrderStore;
 import com.tg.escrow.escrow.EscrowTradeService;
+import com.tg.escrow.escrow.PendingTradeRegistry;
 import com.tg.escrow.escrow.TradeAdmissionContext;
 import com.tg.escrow.escrow.TradeAdmissionGate;
 import com.tg.escrow.escrow.TradeAdmissionPolicy;
@@ -37,6 +39,7 @@ import com.tg.escrow.escrow.TradeHistoryPort;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -50,14 +53,16 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  * 交易命令处理器（S2）的集成测试。
  *
  * <p>刻意<b>不 mock 中间层</b>：用真实的 {@link EscrowTradeService} + 真实的
- * {@link TradeAdmissionGate} + 内存订单存储，验证从命令文本到回执的完整路径——
- * mock 掉门禁就测不出"被拒时的原因文案是否正确接线"这类缺陷。
+ * {@link TradeAdmissionGate} + 内存订单存储 + 真实 {@link PendingTradeRegistry}，
+ * 验证从命令文本到回执的完整路径——mock 掉门禁/登记就测不出"被拒原因文案"与
+ * "ET-34 提示不可绕过"这类接线缺陷。
  */
 class TradeCommandHandlerTest {
 
     private static final long BUYER = 1001L;
     private static final Instant T0 = Instant.parse("2026-09-23T00:00:00Z");
     private static final CommandActor ACTOR = new CommandActor(BUYER, MemberRole.MEMBER);
+    private static final Duration PENDING_TTL = Duration.ofMinutes(10);
 
     /** 内存订单存储：回填自增 id，替代 JPA（无需 Spring 上下文）。 */
     private static final class InMemoryStore implements EscrowOrderStore {
@@ -70,11 +75,15 @@ class TradeCommandHandlerTest {
         }
     }
 
+    private static BotCommand createCmd(String seller, String amount, String currency) {
+        return new BotCommand("escrow", List.of("create", seller, amount, currency));
+    }
+
     private static BotCommand confirmCmd(String seller, String amount, String currency) {
         return new BotCommand("escrow", List.of("confirm", seller, amount, currency));
     }
 
-    /** 用真实 gate + 真实 service 装配 handler。ctx 决定门禁看到的事实。 */
+    /** 用真实 gate + 真实 service + 真实 registry 装配 handler。ctx 决定门禁看到的事实。 */
     private static TradeCommandHandler handler(int maxConcurrent, Duration cooldown,
                                                TradeAdmissionContext ctx) {
         TradeAdmissionGate gate = new TradeAdmissionGate(
@@ -84,8 +93,8 @@ class TradeCommandHandlerTest {
         Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
         return new TradeCommandHandler(
                 new EscrowTradeService(gate, history, new InMemoryStore(), clock),
-                new com.tg.escrow.escrow.AmountTierPolicy(
-                        new java.math.BigDecimal("100"), new java.math.BigDecimal("1000")));
+                new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
+                new PendingTradeRegistry(PENDING_TTL, clock));
     }
 
     private static TradeAdmissionContext clean() {
@@ -102,10 +111,6 @@ class TradeCommandHandlerTest {
         assertThat(h.canHandle(null)).isFalse();
     }
 
-    private static BotCommand createCmd(String seller, String amount, String currency) {
-        return new BotCommand("escrow", List.of("create", seller, amount, currency));
-    }
-
     @Test
     @DisplayName("create 为预览：返回风险提示（ET-34 创建前强制展示），不落单")
     void createPreviewsWithRiskPrompt() {
@@ -118,11 +123,34 @@ class TradeCommandHandlerTest {
     }
 
     @Test
-    @DisplayName("confirm 真正落单 → 回执含订单号")
-    void createsOrder() {
+    @DisplayName("确认后落单：先 create 预览、再 confirm → 回执含订单号")
+    void createsOrderAfterPreview() {
         TradeCommandHandler h = handler(1, Duration.ZERO, clean());
 
+        h.handle(createCmd("2002", "100", "USDT"), ACTOR);   // ET-34 必经的预览
+
         assertThat(h.handle(confirmCmd("2002", "100", "USDT"), ACTOR)).isEqualTo("已创建订单 #1");
+    }
+
+    @Test
+    @DisplayName("ET-34 不可绕过：未经 create 直接 confirm → 被拒，且不落单")
+    void confirmWithoutPreviewRejected() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+
+        String out = h.handle(confirmCmd("2002", "100", "USDT"), ACTOR);
+
+        assertThat(out).contains("先预览").doesNotContain("已创建订单");
+    }
+
+    @Test
+    @DisplayName("ET-34 不可绕过：预览后改参数再 confirm → 被拒（提示针对的是原参数）")
+    void confirmWithChangedParamsRejected() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        h.handle(createCmd("2002", "100", "USDT"), ACTOR);
+
+        String out = h.handle(confirmCmd("2002", "999", "USDT"), ACTOR);
+
+        assertThat(out).contains("先预览").doesNotContain("已创建订单");
     }
 
     @Test
@@ -130,6 +158,7 @@ class TradeCommandHandlerTest {
     void rejectedByConcurrentLimit() {
         TradeCommandHandler h = handler(1, Duration.ZERO,
                 new TradeAdmissionContext(BUYER, 1, null, false));
+        h.handle(createCmd("2002", "100", "USDT"), ACTOR);
 
         String out = h.handle(confirmCmd("2002", "100", "USDT"), ACTOR);
 
@@ -141,6 +170,7 @@ class TradeCommandHandlerTest {
     void rejectedByCooldown() {
         TradeCommandHandler h = handler(5, Duration.ofHours(24),
                 new TradeAdmissionContext(BUYER, 0, T0.minus(Duration.ofHours(1)), false));
+        h.handle(createCmd("2002", "100", "USDT"), ACTOR);
 
         String out = h.handle(confirmCmd("2002", "100", "USDT"), ACTOR);
 
@@ -153,6 +183,7 @@ class TradeCommandHandlerTest {
     void rejectedByDispute() {
         TradeCommandHandler h = handler(5, Duration.ZERO,
                 new TradeAdmissionContext(BUYER, 0, null, true));
+        h.handle(createCmd("2002", "100", "USDT"), ACTOR);
 
         String out = h.handle(confirmCmd("2002", "100", "USDT"), ACTOR);
 
@@ -175,11 +206,20 @@ class TradeCommandHandlerTest {
     }
 
     @Test
-    @DisplayName("自交易（卖方=买方）→ 无法创建")
+    @DisplayName("create 非正金额 → 友好回执，不冒未捕获异常（异常防护对称）")
+    void createRejectsNonPositiveAmount() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+
+        assertThat(h.handle(createCmd("2002", "-5", "USDT"), ACTOR)).contains("无法创建");
+        assertThat(h.handle(createCmd("2002", "0", "USDT"), ACTOR)).contains("无法创建");
+    }
+
+    @Test
+    @DisplayName("自交易（卖方=买方）→ 无法创建（create 预览时即拦下）")
     void selfTradeRejected() {
         TradeCommandHandler h = handler(5, Duration.ZERO, clean());
 
-        assertThat(h.handle(confirmCmd(String.valueOf(BUYER), "100", "USDT"), ACTOR))
+        assertThat(h.handle(createCmd(String.valueOf(BUYER), "100", "USDT"), ACTOR))
                 .contains("无法创建");
     }
 
