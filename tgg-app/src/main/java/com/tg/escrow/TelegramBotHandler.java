@@ -92,7 +92,7 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
                 // 角色保守取 MEMBER：权限只能收紧，不放松（真实角色上线接入后升级）
                 CommandActor actor = new CommandActor(userId, MemberRole.MEMBER);
                 String text = update.getMessage().getText();
-                String response = dispatcher.handle(text, actor);
+                String response = dispatcher.handle(chatId, text, actor);
                 if (response != null) {
                     reply.sendText(chatId, response);
                 }

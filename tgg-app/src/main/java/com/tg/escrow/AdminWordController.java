@@ -25,6 +25,8 @@ package com.tg.escrow;
 
 import com.tg.escrow.core.BannedWordRegistry;
 import com.tg.escrow.moderation.BannedWordStore;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -35,13 +37,14 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * Admin API（S6）：违禁词在线管理（GM-06，tg-group-guard 式实时增删改）。
+ * Admin API（S6）：违禁词在线管理（GM-06）——实时增删改、热生效无需重启。
  *
- * <p>写路径：{@code BannedWordStore} 持久化 → {@link BannedWordRegistry#reload} 热生效——
- * <b>即时生效无需重启</b>；reload 失败（坏正则）返回 400 且词库保持旧值（fail-safe）。
+ * <h2>写路径原子性（审查修复）</h2>
+ * <p>{@code save} 先落库再热编译；<b>编译失败（坏正则）立即回滚持久层</b>——
+ * 毒条目不得留在库里（否则会持续毒化后续 reload 甚至炸启动）。失败返回 <b>HTTP 400</b>
+ * （与本注释契约一致）；{@code disable} 同样如实回报 reload 结果，不无条件 ok=true。
  *
- * <p><b>运行期（HTTP 暴露/鉴权）未经本地验证</b>——部署时必须配鉴权与仅内网暴露
- * （管理端点不应对公网裸奔），属线上阶段验收项。
+ * <p><b>⚠️ 本端点当前无鉴权</b>——部署必须配鉴权且仅内网暴露（线上清单 C1）。
  */
 @RestController
 @RequestMapping("/admin/words")
@@ -64,31 +67,37 @@ public class AdminWordController {
         return store.enabledOf(guildId);
     }
 
-    /** 添加/启用一条违禁词并热生效；坏正则返回 400（词库保持旧值）。 */
+    /** 添加/启用一条违禁词并热生效；坏正则 → 400 且回滚（词库保持旧值）。 */
     @PostMapping("/save")
-    public Map<String, Object> save(@RequestParam("guild") long guildId,
-                                   @RequestParam("word") String word,
-                                   @RequestParam(value = "regex", defaultValue = "false") boolean regex) {
+    public ResponseEntity<Map<String, Object>> save(@RequestParam("guild") long guildId,
+                                                    @RequestParam("word") String word,
+                                                    @RequestParam(value = "regex", defaultValue = "false") boolean regex) {
         store.save(guildId, word, regex);
         if (!reloadAll(guildId)) {
-            return Map.of("ok", false, "error", "词库编译失败（坏正则？），已保留原词库");
+            // 毒条目回滚：不得留在库里持续毒化后续 reload
+            store.disable(guildId, word);
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("ok", false, "error", "词库编译失败（坏正则？），已回滚并保留原词库"));
         }
-        return Map.of("ok", true);
+        return ResponseEntity.ok(Map.of("ok", true));
     }
 
-    /** 停用一条违禁词并热生效。 */
+    /** 停用一条违禁词并热生效；reload 失败如实报错。 */
     @PostMapping("/disable")
-    public Map<String, Object> disable(@RequestParam("guild") long guildId,
-                                      @RequestParam("word") String word) {
+    public ResponseEntity<Map<String, Object>> disable(@RequestParam("guild") long guildId,
+                                                       @RequestParam("word") String word) {
         store.disable(guildId, word);
-        reloadAll(guildId);
-        return Map.of("ok", true);
+        if (!reloadAll(guildId)) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(Map.of("ok", false, "error", "停用后词库编译失败——可能存在毒条目，请核查词库"));
+        }
+        return ResponseEntity.ok(Map.of("ok", true));
     }
 
     private boolean reloadAll(long guildId) {
         List<BannedWordStore.Entry> enabled = store.enabledOf(guildId);
         List<String> exact = enabled.stream().filter(e -> !e.regex()).map(BannedWordStore.Entry::word).toList();
         List<String> regex = enabled.stream().filter(BannedWordStore.Entry::regex).map(BannedWordStore.Entry::word).toList();
-        return registry.reload(exact, regex);
+        return registry.reload(guildId, exact, regex);
     }
 }

@@ -26,48 +26,63 @@ package com.tg.escrow.core;
 import com.tg.escrow.common.TggException;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * 违禁词热更新注册表（GM-06 在线管理，06 材料的方案落地）。
+ * 违禁词热更新注册表（GM-06 在线管理）——<b>按群</b>持有不可变快照。
  *
- * <h2>保持 {@link BannedWordMatcher} 不可变，热更新 = 快照原子切换</h2>
- * <p>匹配器本身不改（其正则校验、空白过滤、大小写折叠已有测试钉住）；本类持有一个
- * {@code volatile} 快照，{@link #reload} 重新编译后原子替换——读线程总能看到一致的词库。
+ * <h2>按群隔离（审查修复）</h2>
+ * <p>每个群一份 {@link BannedWordMatcher} 快照：A 群在线改词只替换 A 的快照，
+ * 不得清空 B/C 群词库（多群互清缺陷的回归防线见 {@code BannedWordRegistryTest}）。
  *
- * <h2>fail-safe：reload 失败保留旧词库</h2>
- * <p>新词库含非法正则时 {@link BannedWordMatcher#compile} 会抛——此时<b>保留旧快照</b>，
- * 而不是让过滤失效。一次错误配置不该把整个群暴露在"无词库"状态（与项目 fail-closed 一致）。
+ * <h2>热更新 = 快照原子切换 + fail-safe</h2>
+ * <p>{@link #reload} 重新编译后原子替换；<b>编译失败保留旧快照</b>——
+ * 一次错误配置（坏正则）不该让过滤失效。匹配器本身不可变（其正则校验、空白过滤、
+ * 大小写折叠已有 {@code BannedWordMatcherTest} 钉住）。
+ *
+ * <p>未配置词库的群不命中（"未登记=不禁"——违禁词是内容规则，与 {@code FeatureToggle}
+ * 的功能开关语义不同：后者未登记=fail-closed 关闭）。
  */
 public final class BannedWordRegistry {
 
-    private volatile BannedWordMatcher matcher;
+    private final Map<Long, BannedWordMatcher> byGuild = new ConcurrentHashMap<>();
 
     /**
-     * @param initial 初始词库（编译失败即抛——启动期 fail-fast）
-     */
-    public BannedWordRegistry(List<String> exactWords, List<String> regexPatterns) {
-        this.matcher = BannedWordMatcher.compile(exactWords, regexPatterns);
-    }
-
-    /**
-     * 热更新词库（Web 后台改词后调用）。
+     * 热更新某群词库（Web 后台改词后调用）。
      *
-     * @return 更新是否成功；{@code false} = 新词库非法，<b>保留旧词库</b>
+     * @param guildId     群 ID（必须为正）
+     * @param exactWords  精确词（不得为 {@code null}）
+     * @param regexPatterns 正则（不得为 {@code null}；坏正则返回 {@code false} 且保留旧词库）
+     * @return 更新是否成功
      */
-    public synchronized boolean reload(List<String> exactWords, List<String> regexPatterns) {
+    public synchronized boolean reload(long guildId, List<String> exactWords, List<String> regexPatterns) {
+        if (guildId <= 0) {
+            throw new TggException("违禁词注册表：群 ID 必须为正，实为 " + guildId);
+        }
+        if (exactWords == null || regexPatterns == null) {
+            throw new TggException("违禁词注册表：词表不得为 null（空表请传 List.of()）");
+        }
         BannedWordMatcher next;
         try {
             next = BannedWordMatcher.compile(exactWords, regexPatterns);
         } catch (TggException ex) {
             return false;
         }
-        this.matcher = next;
+        byGuild.put(guildId, next);
         return true;
     }
 
-    /** 判定消息是否命中违禁词（委托当前快照）。 */
-    public Optional<BannedWordMatcher.Match> firstMatch(String text) {
-        return matcher.firstMatch(text);
+    /**
+     * 判定某群消息是否命中违禁词。
+     *
+     * @param guildId 群 ID
+     * @param text    消息文本
+     * @return 命中结果；该群未配置词库或不命中时为空
+     */
+    public Optional<BannedWordMatcher.Match> firstMatch(long guildId, String text) {
+        BannedWordMatcher matcher = byGuild.get(guildId);
+        return matcher == null ? Optional.empty() : matcher.firstMatch(text);
     }
 }

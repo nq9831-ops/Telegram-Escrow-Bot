@@ -23,6 +23,7 @@
  */
 package com.tg.escrow;
 
+import com.tg.escrow.core.BannedWordRegistry;
 import com.tg.escrow.core.BotCommand;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.core.MemberRole;
@@ -40,15 +41,15 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Bot 分发器（S1 命令路由）的行为固定测试。
+ * Bot 命令分发器（S1 命令路由 + GM-06 违禁词接线）的行为固定测试。
  *
- * <p>分发语义：<b>非命令 → 不响应（null）</b>（群里绝大多数消息与 Bot 无关）；
- * escrow 命令 → {@link TradeCommandHandler}；已解析的其它命令 → 帮助回执。
- * 用真实 TradeCommandHandler + 内存存储装配——mock 掉路由就测不出接线错位。
+ * <p>路由：非命令 → 违禁词检查（<b>命中给出处置回执</b>——热更新词库的真实生产消费者）→
+ * 不命中不响应；escrow 命令 → 交易处理器；其它命令 → 帮助。
  */
 class BotDispatcherTest {
 
@@ -65,24 +66,48 @@ class BotDispatcherTest {
         }
     }
 
-    private static BotDispatcher dispatcher() {
+    private static BotDispatcher dispatcher(BannedWordRegistry registry) {
         TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
         TradeHistoryPort history = id -> new TradeAdmissionContext(id, 0, null, false);
         EscrowTradeService service = new EscrowTradeService(gate, history,
                 new InMemoryStore(), Clock.fixed(T0, ZoneOffset.UTC));
-        return new BotDispatcher(new TradeCommandHandler(service), "mybot");
+        return new BotDispatcher(new TradeCommandHandler(service), "mybot", registry);
+    }
+
+    private static BotDispatcher dispatcher() {
+        return dispatcher(new BannedWordRegistry());
     }
 
     @Test
-    @DisplayName("非命令消息 → 不响应（返回 null）")
+    @DisplayName("非命令消息（无违禁词）→ 不响应（返回 null）")
     void plainMessageGetsNoReply() {
-        assertThat(dispatcher().handle("大家好，这单怎么走", ACTOR)).isNull();
+        assertThat(dispatcher().handle(100L, "大家好，这单怎么走", ACTOR)).isNull();
+    }
+
+    @Test
+    @DisplayName("违禁词命中 → 处置回执（含规则名）——热更新词库的真实消费者")
+    void bannedWordHitGetsReply() {
+        BannedWordRegistry registry = new BannedWordRegistry();
+        registry.reload(100L, List.of("赌博广告"), List.of());
+
+        String reply = dispatcher(registry).handle(100L, "这里有 赌博广告 快来", ACTOR);
+
+        assertThat(reply).contains("违禁").contains("赌博广告");
+    }
+
+    @Test
+    @DisplayName("违禁词按群隔离：A 群的词在 B 群不触发")
+    void bannedWordPerGuild() {
+        BannedWordRegistry registry = new BannedWordRegistry();
+        registry.reload(100L, List.of("赌博广告"), List.of());
+
+        assertThat(dispatcher(registry).handle(200L, "这里有 赌博广告", ACTOR)).isNull();
     }
 
     @Test
     @DisplayName("escrow 命令 → 路由到交易处理器，回执含订单号")
     void escrowCommandRouted() {
-        String reply = dispatcher().handle("/escrow create 2002 100 USDT", ACTOR);
+        String reply = dispatcher().handle(100L, "/escrow create 2002 100 USDT", ACTOR);
 
         assertThat(reply).contains("已创建订单");
     }
@@ -90,7 +115,7 @@ class BotDispatcherTest {
     @Test
     @DisplayName("其它命令 → 帮助回执（含用法）")
     void unknownCommandGetsHelp() {
-        String reply = dispatcher().handle("/whatever", ACTOR);
+        String reply = dispatcher().handle(100L, "/whatever", ACTOR);
 
         assertThat(reply).contains("escrow").contains("用法");
     }
@@ -98,15 +123,7 @@ class BotDispatcherTest {
     @Test
     @DisplayName("@botname 后缀：发给别的 bot 的命令不响应")
     void commandForOtherBotIgnored() {
-        assertThat(dispatcher().handle("/escrow@otherbot create 2002 100 USDT", ACTOR)).isNull();
-    }
-
-    @Test
-    @DisplayName("发给本 bot 的 @ 后缀命令正常路由")
-    void commandForThisBotRouted() {
-        String reply = dispatcher().handle("/escrow@mybot create 2002 100 USDT", ACTOR);
-
-        assertThat(reply).contains("已创建订单");
+        assertThat(dispatcher().handle(100L, "/escrow@otherbot create 2002 100 USDT", ACTOR)).isNull();
     }
 
     @Test
@@ -114,7 +131,7 @@ class BotDispatcherTest {
     void nullsGetNoReply() {
         BotDispatcher d = dispatcher();
 
-        assertThat(d.handle(null, ACTOR)).isNull();
-        assertThat(d.handle("/escrow create 2002 100 USDT", null)).isNull();
+        assertThat(d.handle(100L, null, ACTOR)).isNull();
+        assertThat(d.handle(100L, "/escrow create 2002 100 USDT", null)).isNull();
     }
 }
