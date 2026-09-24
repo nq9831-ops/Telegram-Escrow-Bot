@@ -30,6 +30,8 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -114,5 +116,45 @@ class ModerationOrchestratorTest {
         orch.deleteMessage(1L, new CommandActor(10L, MemberRole.ADMIN), 999L);
 
         assertThat(port.calls).containsExactly("del:999");
+    }
+
+    // ---- 联邦旁路（GM-04/T4 仲裁处置）：显式通道 + 强制审计，不放宽单调守卫 ----
+
+    private static PermissionPolicy federationPolicy(long federationId) {
+        return new PermissionPolicy(Map.of(), Set.of(federationId));
+    }
+
+    @Test
+    @DisplayName("联邦管理员可处置任意角色（含 OWNER）——旁路单调守卫，且返回审计记录")
+    void federationCanModerateAnyone() {
+        ModerationOrchestrator fed = new ModerationOrchestrator(port, federationPolicy(10L));
+
+        ModerationOrchestrator.Audit audit =
+                fed.federationKick(1L, new CommandActor(10L, MemberRole.MEMBER), 22L, MemberRole.OWNER);
+
+        assertThat(port.calls).containsExactly("kick:22");
+        assertThat(audit.action()).isEqualTo("kick");
+        assertThat(audit.actorId()).isEqualTo(10L);
+        assertThat(audit.targetId()).isEqualTo(22L);
+    }
+
+    @Test
+    @DisplayName("非联邦管理员不得走旁路（普通 ADMIN 调 federationKick 拒绝）")
+    void nonFederationRejected() {
+        ModerationOrchestrator fed = new ModerationOrchestrator(port, federationPolicy(10L));
+
+        assertThatThrownBy(() -> fed.federationKick(1L,
+                new CommandActor(11L, MemberRole.ADMIN), 20L, MemberRole.MEMBER))
+                .isInstanceOf(TggException.class);
+        assertThat(port.calls).isEmpty();
+    }
+
+    @Test
+    @DisplayName("未配置联邦策略 → 旁路 fail-closed 拒绝（不可静默放行）")
+    void federationBypassWithoutPolicyRejected() {
+        assertThatThrownBy(() -> orch.federationKick(1L,
+                new CommandActor(10L, MemberRole.OWNER), 20L, MemberRole.MEMBER))
+                .isInstanceOf(TggException.class);
+        assertThat(port.calls).isEmpty();
     }
 }
