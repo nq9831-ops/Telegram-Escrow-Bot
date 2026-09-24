@@ -11,6 +11,7 @@
 | `02-TON-Connect.md` | TON Connect 与 Telegram 官方钱包；含托管 vs 自持的张力分析与决策点 | 用户提交 | 2026-09-24 |
 | `03-TON-Pay与Tolk.md` | TON Pay 支付层 SDK + Tolk 合约；含独立核实与「Web 端点缺口」分析 | 用户提交 | 2026-09-24 |
 | `04-x402与ENACT.md` | x402 交付证明哈希 + ENACT 0% 协议费；含场景适配判断与存储费池约束 | 用户提交 | 2026-09-24 |
+| `05-Fragment与Permit钓鱼防御.md` | Fragment 第三方 SDK（⚠️ 助记词冲突红旗）+ Permit Signature 钓鱼防御 | 用户提交 | 2026-09-24 |
 
 ## 相关文档（不在本目录）
 
