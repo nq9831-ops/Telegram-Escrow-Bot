@@ -109,7 +109,7 @@ public final class MessageGuardOrchestrator {
         // 1) 链接：可疑（非白名单 / 短链）即拦
         if (message.text() != null && !message.text().isBlank()) {
             Optional<LinkMatch> hit = links.firstLink(message.text());
-            if (hit.isPresent() && hit.get().suspicious()) {
+            if (hit.isPresent() && isSuspicious(hit.get())) {
                 return Decision.block("链接不可信：" + hit.get().host());
             }
         }
@@ -129,8 +129,21 @@ public final class MessageGuardOrchestrator {
         return Decision.allow();
     }
 
-    private static String describeMedia(IncomingMessage message) {
-        if (message.fileName() != null && !message.fileName().isBlank()) {
+    /**
+     * 该链接是否该拦。
+     *
+     * <p><b>白名单未配置时只拦短链</b>：未配置 = 没有判定依据，<b>不</b>等于"所有域名都被禁"。
+     * 若直接用 {@link LinkMatch#suspicious()}（= 非白名单即可疑），空白名单会让每一条含链接的
+     * 消息都被判违规——默认部署下就是一场误删。短链则无需白名单依据：它本来就隐藏真实目标。
+     */
+    private boolean isSuspicious(LinkMatch match) {
+        if (!links.hasAllowedDomains()) {
+            return match.shortener();
+        }
+        return match.suspicious();
+    }
+
+    private static String describeMedia(IncomingMessage message) {        if (message.fileName() != null && !message.fileName().isBlank()) {
             return message.fileName();
         }
         return message.mimeType() == null ? message.mediaKind().name() : message.mimeType();

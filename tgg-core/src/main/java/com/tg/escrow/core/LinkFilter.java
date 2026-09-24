@@ -67,6 +67,16 @@ public final class LinkFilter {
     }
 
     /**
+     * 是否配置了白名单域名。
+     *
+     * <p>空白名单表示<b>未配置</b>，而不是"所有域名都被禁"——调用方必须区分这两种情形：
+     * 若把"未配置"当成"全禁"，默认部署下会删光每一条带链接的消息。
+     */
+    public boolean hasAllowedDomains() {
+        return !allowedDomains.isEmpty();
+    }
+
+    /**
      * 返回文本中第一个链接的检出结果。
      *
      * @param text 消息文本

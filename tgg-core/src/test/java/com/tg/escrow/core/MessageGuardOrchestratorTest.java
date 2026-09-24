@@ -87,6 +87,34 @@ class MessageGuardOrchestratorTest {
         assertThat(guard(10).inspect(text("大家早上好")).blocked()).isFalse();
     }
 
+    /** 白名单未配置、但短链表已配置的编排器（模拟默认部署：只有短链表有值）。 */
+    private static MessageGuardOrchestrator unconfigured() {
+        return new MessageGuardOrchestrator(
+                new LinkFilter(List.of(), List.of("t.cn")),
+                new MediaFilter(Set.of(), Set.of()),
+                new RateLimiter(new RateLimitPolicy(Duration.ofMinutes(1), 100, 100, 100)),
+                FIXED);
+    }
+
+    @Test
+    @DisplayName("【缺陷复现】白名单未配置时普通链接不得算违规——否则默认部署会删光带链接的消息")
+    void emptyWhitelistDoesNotFlagOrdinaryLinks() {
+        MessageGuardOrchestrator.Decision d = unconfigured().inspect(text("见 http://good.example/doc"));
+
+        assertThat(d.blocked())
+                .as("未配置白名单 = 没有判定依据，不等于『所有域名都被禁』")
+                .isFalse();
+    }
+
+    @Test
+    @DisplayName("白名单未配置时仍拦短链（短链隐藏真实目标，不需要白名单依据）")
+    void emptyWhitelistStillBlocksShorteners() {
+        MessageGuardOrchestrator.Decision d = unconfigured().inspect(text("短链 http://t.cn/abc"));
+
+        assertThat(d.blocked()).isTrue();
+        assertThat(d.reason()).contains("t.cn");
+    }
+
     // ── 媒体 ────────────────────────────────────────────────────────────
 
     @Test
