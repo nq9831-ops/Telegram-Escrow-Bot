@@ -26,9 +26,11 @@ package com.tg.escrow;
 import com.tg.escrow.core.BannedWordRegistry;
 import com.tg.escrow.core.KeywordAutoReply;
 import com.tg.escrow.escrow.AmountTierPolicy;
+import com.tg.escrow.escrow.EscrowOrder;
 import com.tg.escrow.escrow.EscrowOrderLookupPort;
 import com.tg.escrow.escrow.EscrowOrderRepository;
 import com.tg.escrow.escrow.EscrowOrderStore;
+import com.tg.escrow.escrow.MaintenanceWindow;
 import com.tg.escrow.escrow.EscrowTradeService;
 import com.tg.escrow.escrow.JpaEscrowOrderLookup;
 import com.tg.escrow.escrow.JpaEscrowOrderStore;
@@ -42,9 +44,11 @@ import com.tg.escrow.escrow.TradeHistoryPort;
 import com.tg.escrow.escrow.TradeInviteRepository;
 import com.tg.escrow.escrow.TradeInviteService;
 import com.tg.escrow.escrow.TradeInviteStore;
+import com.tg.escrow.escrow.TradeMaintenanceService;
 import com.tg.escrow.escrow.TradeReviewRepository;
 import com.tg.escrow.escrow.TradeReviewService;
 import com.tg.escrow.escrow.TradeReviewStore;
+import com.tg.escrow.escrow.TradeTimeoutPolicy;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -53,6 +57,8 @@ import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Bot 与交易链的 Bean 装配（S1 收口）。
@@ -164,6 +170,39 @@ public class BotWiring {
         return new TradeReviewService(store, clock);
     }
 
+    /** 维护期窗口（Wave 4）：交付后买方验收的 5 个时长选项；默认项可配。 */
+    @Bean
+    public MaintenanceWindow maintenanceWindow(
+            @Value("${tgg.maintenance.option1:PT1H}") Duration o1,
+            @Value("${tgg.maintenance.option2:PT6H}") Duration o2,
+            @Value("${tgg.maintenance.option3:PT24H}") Duration o3,
+            @Value("${tgg.maintenance.option4:PT72H}") Duration o4,
+            @Value("${tgg.maintenance.option5:PT168H}") Duration o5,
+            @Value("${tgg.maintenance.default-index:2}") int defaultIndex) {
+        return new MaintenanceWindow(List.of(o1, o2, o3, o4, o5), defaultIndex);
+    }
+
+    /**
+     * 超时策略（Wave 4）：交付后超过维护期 → 自动确认（放款）。
+     *
+     * <p>时长与 {@link MaintenanceWindow#defaultDuration()} <b>同源</b>——两处各写一份会漂移，
+     * 那时"维护期还剩多久"与"何时自动放款"就会互相矛盾。
+     */
+    @Bean
+    public TradeTimeoutPolicy tradeTimeoutPolicy(MaintenanceWindow window) {
+        return new TradeTimeoutPolicy(Map.of(
+                EscrowOrder.State.DELIVERED,
+                new TradeTimeoutPolicy.TimeoutRule(
+                        window.defaultDuration(), TradeTimeoutPolicy.TimeoutAction.AUTO_CONFIRM)));
+    }
+
+    /** 维护期服务（只判定、不执行——无调度器，超时不会自动放款）。 */
+    @Bean
+    public TradeMaintenanceService tradeMaintenanceService(MaintenanceWindow window,
+                                                           TradeTimeoutPolicy policy, Clock clock) {
+        return new TradeMaintenanceService(window, policy, clock);
+    }
+
     @Bean
     public TradeCommandHandler tradeCommandHandler(EscrowTradeService service,
                                                    AmountTierPolicy tierPolicy,
@@ -171,9 +210,10 @@ public class BotWiring {
                                                    EscrowOrderLookupPort lookup,
                                                    TradeInviteService inviteService,
                                                    InviteLink inviteLink,
-                                                   TradeReviewService reviewService) {
+                                                   TradeReviewService reviewService,
+                                                   TradeMaintenanceService maintenanceService) {
         return new TradeCommandHandler(service, tierPolicy, pending, lookup, inviteService, inviteLink,
-                reviewService);
+                reviewService, maintenanceService);
     }
 
     /** GM-17 自动回复（空规则表；上线后由管理端注册关键词）。 */

@@ -40,10 +40,12 @@ import com.tg.escrow.escrow.TradeInitiationResult;
 import com.tg.escrow.escrow.TradeInvite;
 import com.tg.escrow.escrow.TradeInviteCreationResult;
 import com.tg.escrow.escrow.TradeInviteService;
+import com.tg.escrow.escrow.TradeMaintenanceService;
 import com.tg.escrow.escrow.TradeReviewService;
 import com.tg.escrow.escrow.TradeStatusView;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 
 /**
  * 交易命令处理器（S2 / T1 收口）——两步流：<b>create 预览风险提示（ET-34），confirm 校验前置后落单</b>。
@@ -109,11 +111,13 @@ public final class TradeCommandHandler {
     private final TradeInviteService inviteService;
     private final InviteLink inviteLink;
     private final TradeReviewService reviewService;
+    private final TradeMaintenanceService maintenanceService;
 
     public TradeCommandHandler(EscrowTradeService service, AmountTierPolicy tierPolicy,
                                PendingTradeRegistry pending, EscrowOrderLookupPort lookup,
                                TradeInviteService inviteService, InviteLink inviteLink,
-                               TradeReviewService reviewService) {
+                               TradeReviewService reviewService,
+                               TradeMaintenanceService maintenanceService) {
         if (service == null || tierPolicy == null || pending == null || lookup == null) {
             throw new TggException("命令处理：交易服务、金额分层策略、待确认登记与订单查询端口均不可为空");
         }
@@ -123,6 +127,9 @@ public final class TradeCommandHandler {
         if (reviewService == null) {
             throw new TggException("命令处理：评价服务不可为空");
         }
+        if (maintenanceService == null) {
+            throw new TggException("命令处理：维护期服务不可为空");
+        }
         this.service = service;
         this.tierPolicy = tierPolicy;
         this.pending = pending;
@@ -130,6 +137,7 @@ public final class TradeCommandHandler {
         this.inviteService = inviteService;
         this.inviteLink = inviteLink;
         this.reviewService = reviewService;
+        this.maintenanceService = maintenanceService;
     }
 
     /** 本处理器是否管辖该命令。 */
@@ -355,14 +363,43 @@ public final class TradeCommandHandler {
         if (orderId == null) {
             return USAGE;
         }
-        return lookup.byId(orderId)
-                .map(EscrowOrder::currentState)
-                .map(TradeStatusView::of)
-                .map(view -> "订单 #" + orderId + "：" + view.summary()
-                        + "\n下一步：" + view.nextStep()
-                        + statusHint(orderId, view.state())
-                        + fundCaveat(view.state()))
-                .orElse("订单 #" + orderId + " 不存在（请核对订单号）");
+        EscrowOrder order = lookup.byId(orderId).orElse(null);
+        if (order == null) {
+            return "订单 #" + orderId + " 不存在（请核对订单号）";
+        }
+        TradeStatusView view = TradeStatusView.of(order.currentState());
+        return "订单 #" + orderId + "：" + view.summary()
+                + "\n下一步：" + view.nextStep()
+                + statusHint(orderId, view.state())
+                + maintenanceNote(order)
+                + fundCaveat(view.state());
+    }
+
+    /**
+     * 交付后的维护期提示：<b>只报告事实</b>（还剩多久 / 已过），并明说不自动执行。
+     *
+     * <p>不提"自动放款"以免用户以为到点钱会自己走——本项目无调度器，超时不会自动执行。
+     */
+    private String maintenanceNote(EscrowOrder order) {
+        TradeMaintenanceService.MaintenanceStatus status = maintenanceService.statusOf(order);
+        if (!status.applicable()) {
+            return "";
+        }
+        if (status.expired()) {
+            return "\n维护期已过，可验收放款（注：无调度器，不会自动执行）。";
+        }
+        return "\n维护期剩余 " + humanDuration(status.remaining())
+                + "，期满后可验收放款（注：无调度器，不会自动执行）。";
+    }
+
+    /** 把时长说成人能读的话——秒级对用户无意义，最小到分钟。 */
+    private static String humanDuration(Duration d) {
+        long hours = d.toHours();
+        long minutes = d.toMinutesPart();
+        if (hours > 0) {
+            return hours + " 小时" + (minutes > 0 ? " " + minutes + " 分钟" : "");
+        }
+        return Math.max(minutes, 1) + " 分钟";
     }
 
     /**

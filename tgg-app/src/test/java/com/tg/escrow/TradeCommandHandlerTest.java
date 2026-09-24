@@ -41,6 +41,7 @@ import com.tg.escrow.escrow.TradeHistoryPort;
 import com.tg.escrow.escrow.TradeInvite;
 import com.tg.escrow.escrow.TradeInviteService;
 import com.tg.escrow.escrow.TradeInviteStore;
+import com.tg.escrow.escrow.TradeMaintenanceService;
 import com.tg.escrow.escrow.TradeReviewService;
 import com.tg.escrow.escrow.TradeReviewStore;
 import org.junit.jupiter.api.DisplayName;
@@ -177,7 +178,8 @@ class TradeCommandHandlerTest {
                 store,
                 inviteService(gate, history, store, clock),
                 new InviteLink(BOT_USERNAME),
-                new TradeReviewService(new InMemoryReviewStore(), clock)), store);
+                new TradeReviewService(new InMemoryReviewStore(), clock),
+                maintenanceService(clock)), store);
     }
 
     /** 用真实 gate + 真实 service + 真实 registry 装配 handler。ctx 决定门禁看到的事实。 */
@@ -196,7 +198,22 @@ class TradeCommandHandlerTest {
                 store,
                 inviteService(gate, history, store, clock),
                 new InviteLink(BOT_USERNAME),
-                new TradeReviewService(new InMemoryReviewStore(), clock));
+                new TradeReviewService(new InMemoryReviewStore(), clock),
+                maintenanceService(clock));
+    }
+
+    /** 维护期服务：5 选项 + 默认第 3 项（24h）；超时规则与维护期时长同源。 */
+    private static TradeMaintenanceService maintenanceService(Clock clock) {
+        var window = new com.tg.escrow.escrow.MaintenanceWindow(
+                java.util.List.of(java.time.Duration.ofHours(1), java.time.Duration.ofHours(6),
+                        java.time.Duration.ofHours(24), java.time.Duration.ofHours(72),
+                        java.time.Duration.ofHours(168)), 2);
+        var policy = new com.tg.escrow.escrow.TradeTimeoutPolicy(java.util.Map.of(
+                EscrowOrder.State.DELIVERED,
+                new com.tg.escrow.escrow.TradeTimeoutPolicy.TimeoutRule(
+                        window.defaultDuration(),
+                        com.tg.escrow.escrow.TradeTimeoutPolicy.TimeoutAction.AUTO_CONFIRM)));
+        return new TradeMaintenanceService(window, policy, clock);
     }
 
     /** 邀请服务：复用同一门禁/历史/存储/时钟，令牌固定便于断言。 */
@@ -661,5 +678,49 @@ class TradeCommandHandlerTest {
         h.handle(releaseCmd("1"), ACTOR);
 
         assertThat(h.handle(statusCmd("1"), ACTOR)).contains("/escrow review 1");
+    }
+
+    // ── 接线集成（Wave 4）：整链路走通，真实依赖非 mock ────────────────────
+
+    @Test
+    @DisplayName("【整链路】create→confirm→lock→deliver→release→review 全程可走通")
+    void fullHappyPathThroughRealDependencies() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+
+        assertThat(h.handle(lockCmd("1"), ACTOR)).contains("已锁仓");
+        assertThat(h.handle(deliverCmd("1"), SELLER_ACTOR)).contains("已交付");
+        assertThat(h.handle(releaseCmd("1"), ACTOR)).contains("放款给卖方");
+        assertThat(h.handle(reviewCmd("1", "5"), ACTOR)).contains("评价");
+
+        // 终态经状态回执核对（不是只看某一步的回执）
+        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("已放款给卖方");
+    }
+
+    @Test
+    @DisplayName("【整链路】create→confirm→lock→dispute 争议可发起并可查")
+    void disputePathThroughRealDependencies() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+
+        assertThat(h.handle(lockCmd("1"), ACTOR)).contains("已锁仓");
+        assertThat(h.handle(disputeCmd("1"), SELLER_ACTOR)).contains("争议");
+        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("订单争议中");
+    }
+
+    @Test
+    @DisplayName("交付后状态回执报维护期剩余，并明说【不会自动执行】（无调度器，不误导用户）")
+    void statusReportsMaintenanceWindow() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+        h.handle(lockCmd("1"), ACTOR);
+        h.handle(deliverCmd("1"), SELLER_ACTOR);
+
+        String out = h.handle(statusCmd("1"), ACTOR);
+
+        assertThat(out).contains("维护期");
+        assertThat(out)
+                .as("维护期超时不会自动放款——必须如实告知，别让用户以为到点钱会自己走")
+                .contains("不会自动执行");
     }
 }

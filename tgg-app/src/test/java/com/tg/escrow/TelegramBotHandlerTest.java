@@ -38,6 +38,7 @@ import com.tg.escrow.escrow.TradeHistoryPort;
 import com.tg.escrow.escrow.TradeInvite;
 import com.tg.escrow.escrow.TradeInviteService;
 import com.tg.escrow.escrow.TradeInviteStore;
+import com.tg.escrow.escrow.TradeMaintenanceService;
 import com.tg.escrow.escrow.TradeReviewService;
 import com.tg.escrow.escrow.TradeReviewStore;
 import org.junit.jupiter.api.DisplayName;
@@ -130,6 +131,20 @@ class TelegramBotHandlerTest {
         }
     }
 
+    /** 本类不测维护期——装配成形即可（5 选项 + 默认第 3 项）。 */
+    private static TradeMaintenanceService maintenanceService(Clock clock) {
+        var window = new com.tg.escrow.escrow.MaintenanceWindow(
+                java.util.List.of(java.time.Duration.ofHours(1), java.time.Duration.ofHours(6),
+                        java.time.Duration.ofHours(24), java.time.Duration.ofHours(72),
+                        java.time.Duration.ofHours(168)), 2);
+        var policy = new com.tg.escrow.escrow.TradeTimeoutPolicy(java.util.Map.of(
+                EscrowOrder.State.DELIVERED,
+                new com.tg.escrow.escrow.TradeTimeoutPolicy.TimeoutRule(
+                        window.defaultDuration(),
+                        com.tg.escrow.escrow.TradeTimeoutPolicy.TimeoutAction.AUTO_CONFIRM)));
+        return new TradeMaintenanceService(window, policy, clock);
+    }
+
     /** 本类不测评价路径——给个空实现让装配成形即可。 */
     private static TradeReviewService noopReviewService(Clock clock) {
         return new TradeReviewService(new TradeReviewStore() {
@@ -162,7 +177,8 @@ class TelegramBotHandlerTest {
                 new TradeInviteService(gate, history, new NoopInviteStore(), store,
                         Duration.ofHours(24), () -> "tok0", clock),
                 new InviteLink("mybot"),
-                noopReviewService(clock));
+                noopReviewService(clock),
+                maintenanceService(clock));
         BotDispatcher dispatcher = new BotDispatcher(trade, "mybot",
                 new BannedWordRegistry(), new KeywordAutoReply());
         return new TelegramBotHandler(BotTokenConfig.from(k -> "123456:TESTTOKEN"), dispatcher,
