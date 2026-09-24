@@ -35,6 +35,9 @@ import com.tg.escrow.escrow.TradeAdmissionContext;
 import com.tg.escrow.escrow.TradeAdmissionGate;
 import com.tg.escrow.escrow.TradeAdmissionPolicy;
 import com.tg.escrow.escrow.TradeHistoryPort;
+import com.tg.escrow.escrow.TradeInvite;
+import com.tg.escrow.escrow.TradeInviteService;
+import com.tg.escrow.escrow.TradeInviteStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
@@ -112,6 +115,19 @@ class TelegramBotHandlerTest {
         }
     }
 
+    /** 本类不测邀请路径——给个空实现让装配成形即可。 */
+    private static final class NoopInviteStore implements TradeInviteStore {
+        @Override
+        public TradeInvite save(TradeInvite invite) {
+            return invite;
+        }
+
+        @Override
+        public Optional<TradeInvite> byToken(String token) {
+            return Optional.empty();
+        }
+    }
+
     private static final String WEBAPP_URL = "https://example.test/miniapp/index.html";
 
     private static TelegramBotHandler handler(RecordingReply reply, InMemoryStore store) {
@@ -126,7 +142,10 @@ class TelegramBotHandlerTest {
                 new EscrowTradeService(gate, history, store, clock),
                 new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
                 new PendingTradeRegistry(Duration.ofMinutes(10), clock),
-                store);
+                store,
+                new TradeInviteService(gate, history, new NoopInviteStore(), store,
+                        Duration.ofHours(24), () -> "tok0", clock),
+                new InviteLink("mybot"));
         BotDispatcher dispatcher = new BotDispatcher(trade, "mybot",
                 new BannedWordRegistry(), new KeywordAutoReply());
         return new TelegramBotHandler(BotTokenConfig.from(k -> "123456:TESTTOKEN"), dispatcher,

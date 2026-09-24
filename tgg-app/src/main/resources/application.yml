@@ -36,6 +36,9 @@ tgg:
       confirm-max: ${TGG_TIER_CONFIRM_MAX:1000}
   pending:
     ttl: ${TGG_PENDING_TTL:PT10M}
+  invite:
+    # 邀请有效期：对方须在此期限内点开链接接单，否则失效（惰性过期校验）
+    ttl: ${TGG_INVITE_TTL:PT24H}
   webapp:
     # Mini App 表单页地址（必须 HTTPS——Telegram 硬性要求）。留空则「用法/帮助」回执退化为
     # 纯文本、不带「打开表单」按钮。

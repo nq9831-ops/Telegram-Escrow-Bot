@@ -47,7 +47,8 @@ import java.util.Optional;
  */
 public final class BotDispatcher {
 
-    private static final String HELP = "我是担保交易助手。用法：/escrow create <卖方ID> <金额> <币种> 预览风险；"
+    private static final String HELP = "我是担保交易助手。用法：/escrow invite <金额> <币种> 生成邀请链接"
+            + "（对方点开即接单）；/escrow create <卖方ID> <金额> <币种> 预览风险，"
             + "确认后 /escrow confirm 创建交易。";
 
     private final TradeCommandHandler tradeHandler;

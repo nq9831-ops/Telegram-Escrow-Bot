@@ -37,6 +37,9 @@ import com.tg.escrow.escrow.RiskPrompt;
 import com.tg.escrow.escrow.TradeAdmissionDecision;
 import com.tg.escrow.escrow.TradeInitiationRequest;
 import com.tg.escrow.escrow.TradeInitiationResult;
+import com.tg.escrow.escrow.TradeInvite;
+import com.tg.escrow.escrow.TradeInviteCreationResult;
+import com.tg.escrow.escrow.TradeInviteService;
 import com.tg.escrow.escrow.TradeStatusView;
 
 import java.math.BigDecimal;
@@ -62,6 +65,7 @@ import java.math.BigDecimal;
 public final class TradeCommandHandler {
 
     private static final String COMMAND = "escrow";
+    private static final String SUB_INVITE = "invite";
     private static final String SUB_CREATE = "create";
     private static final String SUB_CONFIRM = "confirm";
     private static final String SUB_STATUS = "status";
@@ -69,7 +73,8 @@ public final class TradeCommandHandler {
     /**
      * 用法说明文案（公开，供分发器判定"这条回执是用法说明"——从而在胶水层附上打开表单的按钮）。
      */
-    public static final String USAGE = "用法：/escrow create <卖方ID> <金额> <币种> 预览风险；"
+    public static final String USAGE = "用法：/escrow invite <金额> <币种> 生成邀请链接（对方点开即接单）；"
+            + "/escrow create <卖方ID> <金额> <币种> 预览风险；"
             + "确认后发 /escrow confirm <卖方ID> <金额> <币种> 创建交易；"
             + "/escrow status <订单号> 查询订单状态；"
             + "/escrow cancel <订单号> 取消订单（仅当事人，且资金未锁仓时）";
@@ -78,16 +83,24 @@ public final class TradeCommandHandler {
     private final AmountTierPolicy tierPolicy;
     private final PendingTradeRegistry pending;
     private final EscrowOrderLookupPort lookup;
+    private final TradeInviteService inviteService;
+    private final InviteLink inviteLink;
 
     public TradeCommandHandler(EscrowTradeService service, AmountTierPolicy tierPolicy,
-                               PendingTradeRegistry pending, EscrowOrderLookupPort lookup) {
+                               PendingTradeRegistry pending, EscrowOrderLookupPort lookup,
+                               TradeInviteService inviteService, InviteLink inviteLink) {
         if (service == null || tierPolicy == null || pending == null || lookup == null) {
             throw new TggException("命令处理：交易服务、金额分层策略、待确认登记与订单查询端口均不可为空");
+        }
+        if (inviteService == null || inviteLink == null) {
+            throw new TggException("命令处理：邀请服务与邀请链接构造器均不可为空");
         }
         this.service = service;
         this.tierPolicy = tierPolicy;
         this.pending = pending;
         this.lookup = lookup;
+        this.inviteService = inviteService;
+        this.inviteLink = inviteLink;
     }
 
     /** 本处理器是否管辖该命令。 */
@@ -119,6 +132,9 @@ public final class TradeCommandHandler {
         }
         if (SUB_CANCEL.equals(sub)) {
             return handleCancel(cmd, actor);
+        }
+        if (SUB_INVITE.equals(sub)) {
+            return handleInvite(cmd, actor);
         }
 
         if (!SUB_CREATE.equals(sub) && !SUB_CONFIRM.equals(sub)) {
@@ -170,6 +186,41 @@ public final class TradeCommandHandler {
                 ? "暂无法预估"
                 : decision.retryAfter().toString();
         return "被拒：" + reasonText(decision.reason()) + "，可重试：" + retry;
+    }
+
+    /**
+     * 深链邀请：建一条待接受邀请，回执带可转发给对方的直链。
+     *
+     * <p>被拒是<b>正常业务结果</b>（回原因与可重试时刻）；参数非法（外币种/非正金额/缺参）回用法。
+     * 建邀请阶段<b>不物化订单</b>——订单只会在对方点开链接接单时产生。
+     */
+    private String handleInvite(BotCommand cmd, CommandActor actor) {
+        BigDecimal amount = parseAmount(cmd.argOpt(1).orElse(null));
+        String currency = cmd.argOpt(2).orElse(null);
+        if (amount == null || currency == null || currency.isBlank()) {
+            return USAGE;
+        }
+
+        TradeInviteCreationResult result;
+        try {
+            result = inviteService.create(actor.userId(), amount, currency);
+        } catch (EscrowException ex) {
+            return "无法创建邀请：" + ex.getMessage();
+        }
+
+        if (result.status() == TradeInviteCreationResult.Status.REJECTED) {
+            TradeAdmissionDecision decision = result.decision();
+            String retry = decision.retryAfter() == null
+                    ? "暂无法预估"
+                    : decision.retryAfter().toString();
+            return "被拒：" + reasonText(decision.reason()) + "，可重试：" + retry;
+        }
+
+        TradeInvite invite = result.invite();
+        return "已创建待接受邀请（" + invite.getAmount().toPlainString() + " " + invite.getCurrency()
+                + "，有效期至 " + invite.getExpiresAt() + "）\n"
+                + "把下面链接发给对方，对方点开即自动接单：\n"
+                + inviteLink.forToken(invite.getToken());
     }
 
     /**

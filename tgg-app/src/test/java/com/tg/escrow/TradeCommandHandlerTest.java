@@ -38,6 +38,9 @@ import com.tg.escrow.escrow.TradeAdmissionContext;
 import com.tg.escrow.escrow.TradeAdmissionGate;
 import com.tg.escrow.escrow.TradeAdmissionPolicy;
 import com.tg.escrow.escrow.TradeHistoryPort;
+import com.tg.escrow.escrow.TradeInvite;
+import com.tg.escrow.escrow.TradeInviteService;
+import com.tg.escrow.escrow.TradeInviteStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -97,6 +100,29 @@ class TradeCommandHandlerTest {
         }
     }
 
+    /** 本 bot 用户名（用于拼深链）。 */
+    private static final String BOT_USERNAME = "nq9831ops_bot";
+
+    /** 内存邀请存储（建邀请/接单路径用）。 */
+    private static final class InMemoryInviteStore implements TradeInviteStore {
+        private final java.util.Map<String, TradeInvite> byToken = new java.util.HashMap<>();
+        private long seq;
+
+        @Override
+        public TradeInvite save(TradeInvite invite) {
+            if (invite.getId() == null) {
+                invite.assignId(++seq);
+            }
+            byToken.put(invite.getToken(), invite);
+            return invite;
+        }
+
+        @Override
+        public java.util.Optional<TradeInvite> byToken(String token) {
+            return java.util.Optional.ofNullable(byToken.get(token));
+        }
+    }
+
     private static BotCommand createCmd(String seller, String amount, String currency) {
         return new BotCommand("escrow", List.of("create", seller, amount, currency));
     }
@@ -128,7 +154,9 @@ class TradeCommandHandlerTest {
                 new EscrowTradeService(gate, history, store, clock),
                 new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
                 new PendingTradeRegistry(PENDING_TTL, clock),
-                store), store);
+                store,
+                inviteService(gate, history, store, clock),
+                new InviteLink(BOT_USERNAME)), store);
     }
 
     /** 用真实 gate + 真实 service + 真实 registry 装配 handler。ctx 决定门禁看到的事实。 */
@@ -144,7 +172,16 @@ class TradeCommandHandlerTest {
                 new EscrowTradeService(gate, history, store, clock),
                 new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
                 new PendingTradeRegistry(PENDING_TTL, clock),
-                store);
+                store,
+                inviteService(gate, history, store, clock),
+                new InviteLink(BOT_USERNAME));
+    }
+
+    /** 邀请服务：复用同一门禁/历史/存储/时钟，令牌固定便于断言。 */
+    private static TradeInviteService inviteService(TradeAdmissionGate gate, TradeHistoryPort history,
+                                                   EscrowOrderStore store, Clock clock) {
+        return new TradeInviteService(gate, history, new InMemoryInviteStore(), store,
+                Duration.ofHours(24), () -> "invitetoken0", clock);
     }
 
     private static TradeAdmissionContext clean() {
@@ -361,5 +398,60 @@ class TradeCommandHandlerTest {
 
         assertThat(out).contains("已被他人变更").contains("重查");
         assertThat(out).doesNotContain("已取消");   // 冲突时绝不能报成功
+    }
+
+    // ── invite：深链邀请（Wave 3）────────────────────────────────────────
+
+    private static BotCommand inviteCmd(String amount, String currency) {
+        return new BotCommand("escrow", List.of("invite", amount, currency));
+    }
+
+    @Test
+    @DisplayName("invite：生成待接受邀请，回执含 startapp 深链，且【不落单】")
+    void inviteReturnsDeepLink() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+
+        String out = h.handle(inviteCmd("100", "USDT"), ACTOR);
+
+        assertThat(out).contains("https://t.me/" + BOT_USERNAME + "?startapp=");
+        assertThat(out).contains("100").contains("USDT");
+        assertThat(out).doesNotContain("已创建订单");   // 建邀请阶段不物化订单
+    }
+
+    @Test
+    @DisplayName("invite：参数缺失 → 用法说明")
+    void inviteBadArgs() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+
+        assertThat(h.handle(new BotCommand("escrow", List.of("invite")), ACTOR)).contains("用法");
+        assertThat(h.handle(new BotCommand("escrow", List.of("invite", "100")), ACTOR)).contains("用法");
+        assertThat(h.handle(new BotCommand("escrow", List.of("invite", "100", "")), ACTOR)).contains("用法");
+    }
+
+    @Test
+    @DisplayName("invite：白名单外币种 → 无法创建邀请（与 create 同一收口）")
+    void inviteRejectsUnsupportedCurrency() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+
+        assertThat(h.handle(inviteCmd("100", "BTC"), ACTOR)).contains("无法创建邀请");
+    }
+
+    @Test
+    @DisplayName("invite：发起人已达并发上限 → 被拒 + 原因")
+    void inviteRejectedByGate() {
+        TradeCommandHandler h = handler(1, Duration.ZERO,
+                new TradeAdmissionContext(BUYER, 1, null, false));
+
+        String out = h.handle(inviteCmd("100", "USDT"), ACTOR);
+
+        assertThat(out).contains("被拒").contains("已有进行中的交易");
+    }
+
+    @Test
+    @DisplayName("用法说明涵盖 invite（用户能从回执知道怎么生成邀请）")
+    void usageMentionsInvite() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+
+        assertThat(h.handle(new BotCommand("escrow", List.of("invite")), ACTOR)).contains("invite");
     }
 }

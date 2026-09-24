@@ -33,10 +33,14 @@ import com.tg.escrow.escrow.EscrowTradeService;
 import com.tg.escrow.escrow.JpaEscrowOrderLookup;
 import com.tg.escrow.escrow.JpaEscrowOrderStore;
 import com.tg.escrow.escrow.JpaTradeHistoryPort;
+import com.tg.escrow.escrow.JpaTradeInviteStore;
 import com.tg.escrow.escrow.PendingTradeRegistry;
 import com.tg.escrow.escrow.TradeAdmissionGate;
 import com.tg.escrow.escrow.TradeAdmissionPolicy;
 import com.tg.escrow.escrow.TradeHistoryPort;
+import com.tg.escrow.escrow.TradeInviteRepository;
+import com.tg.escrow.escrow.TradeInviteService;
+import com.tg.escrow.escrow.TradeInviteStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -119,12 +123,39 @@ public class BotWiring {
         return new com.tg.escrow.webapp.WebAppInitDataVerifier(tokenConfig.token(), maxAge, clock);
     }
 
+    /** 待接受邀请的存储端口（深链邀请流，Wave 1/3）。 */
+    @Bean
+    public TradeInviteStore tradeInviteStore(TradeInviteRepository repository) {
+        return new JpaTradeInviteStore(repository);
+    }
+
+    /**
+     * 深链邀请服务（建邀请 / 接单）。有效期走配置项 {@code tgg.invite.ttl}，
+     * 令牌用 {@code SecureRandom} 生成（不可枚举）。
+     */
+    @Bean
+    public TradeInviteService tradeInviteService(TradeAdmissionGate gate, TradeHistoryPort history,
+                                                 TradeInviteStore inviteStore, EscrowOrderStore orderStore,
+                                                 @Value("${tgg.invite.ttl:PT24H}") Duration ttl,
+                                                 Clock clock) {
+        return new TradeInviteService(gate, history, inviteStore, orderStore, ttl,
+                TradeInviteService.secureRandomTokenSupplier(), clock);
+    }
+
+    /** 邀请深链构造器（{@code https://t.me/<bot>?startapp=<token>}）——bot 用户名来自配置。 */
+    @Bean
+    public InviteLink inviteLink(@Value("${tgg.bot.username}") String botUsername) {
+        return new InviteLink(botUsername);
+    }
+
     @Bean
     public TradeCommandHandler tradeCommandHandler(EscrowTradeService service,
                                                    AmountTierPolicy tierPolicy,
                                                    PendingTradeRegistry pending,
-                                                   EscrowOrderLookupPort lookup) {
-        return new TradeCommandHandler(service, tierPolicy, pending, lookup);
+                                                   EscrowOrderLookupPort lookup,
+                                                   TradeInviteService inviteService,
+                                                   InviteLink inviteLink) {
+        return new TradeCommandHandler(service, tierPolicy, pending, lookup, inviteService, inviteLink);
     }
 
     /** GM-17 自动回复（空规则表；上线后由管理端注册关键词）。 */

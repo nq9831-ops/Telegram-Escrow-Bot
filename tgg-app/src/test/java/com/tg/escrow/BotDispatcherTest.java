@@ -36,6 +36,9 @@ import com.tg.escrow.escrow.TradeAdmissionContext;
 import com.tg.escrow.escrow.TradeAdmissionGate;
 import com.tg.escrow.escrow.TradeAdmissionPolicy;
 import com.tg.escrow.escrow.TradeHistoryPort;
+import com.tg.escrow.escrow.TradeInvite;
+import com.tg.escrow.escrow.TradeInviteService;
+import com.tg.escrow.escrow.TradeInviteStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -69,6 +72,19 @@ class BotDispatcherTest {
         }
     }
 
+    /** 本类不测邀请路径——给个空实现让装配成形即可。 */
+    private static final class NoopInviteStore implements TradeInviteStore {
+        @Override
+        public TradeInvite save(TradeInvite invite) {
+            return invite;
+        }
+
+        @Override
+        public java.util.Optional<TradeInvite> byToken(String token) {
+            return java.util.Optional.empty();
+        }
+    }
+
     /** 真实 service + 真实 registry 的交易处理器（不 mock 中间层）。 */
     private static TradeCommandHandler tradeHandler() {
         TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
@@ -78,7 +94,10 @@ class BotDispatcherTest {
                 new EscrowTradeService(gate, history, new InMemoryStore(), clock),
                 new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
                 new PendingTradeRegistry(Duration.ofMinutes(10), clock),
-                orderId -> java.util.Optional.empty());   // 本类不测 T2 查询，stub 即可
+                orderId -> java.util.Optional.empty(),   // 本类不测 T2 查询，stub 即可
+                new TradeInviteService(gate, history, new NoopInviteStore(), new InMemoryStore(),
+                        Duration.ofHours(24), () -> "tok0", clock),
+                new InviteLink("mybot"));
     }
 
     private static BotDispatcher dispatcher(BannedWordRegistry registry) {
