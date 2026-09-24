@@ -13,8 +13,9 @@ import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
  */
 @SpringBootConfiguration
 @EnableAutoConfiguration
-@EntityScan(basePackageClasses = EscrowOrder.class)
-@EnableJpaRepositories(basePackageClasses = EscrowOrderRepository.class)
+@EntityScan(basePackageClasses = {EscrowOrder.class, com.tg.escrow.moderation.WarningPort.class})
+@EnableJpaRepositories(basePackageClasses = {EscrowOrderRepository.class, com.tg.escrow.moderation.UserPreferencePort.class})
+@org.springframework.context.annotation.Import(com.tg.escrow.moderation.ModerationPersistenceConfig.class)
 public class EscrowPersistenceTestConfig {
 
     @Bean
