@@ -244,6 +244,16 @@ public class EscrowOrder {
         return id;
     }
 
+    /**
+     * 回填主键——供<b>非 JPA</b> 的存储实现（内存 / 测试替身）使用。
+     *
+     * <p>JPA 实现由容器在 {@code save} 后自动生成 id，无需调用本方法；
+     * 内存实现没有容器代劳，必须自行回填，否则上层读到的是 {@code null}。
+     */
+    public void assignId(long id) {
+        this.id = id;
+    }
+
     public long getBuyerUserId() {
         return buyerUserId;
     }
