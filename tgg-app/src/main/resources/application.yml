@@ -23,6 +23,20 @@ spring:
     enabled: true
     locations: classpath:db/migration
 
+# Bot 与交易链参数（部署者按需覆盖；此处默认值仅为示例，不构成建议）。
+# token 刻意不在此处——只从环境变量 TELEGRAM_BOT_TOKEN 读（BotTokenConfig），避免凭证进仓库。
+tgg:
+  bot:
+    username: ${TELEGRAM_BOT_USERNAME:nq9831ops_bot}
+  trade:
+    concurrent-max: ${TGG_TRADE_CONCURRENT_MAX:1}
+    cooldown: ${TGG_TRADE_COOLDOWN:PT0S}
+    tier:
+      normal-max: ${TGG_TIER_NORMAL_MAX:100}
+      confirm-max: ${TGG_TIER_CONFIRM_MAX:1000}
+  pending:
+    ttl: ${TGG_PENDING_TTL:PT10M}
+
 logging:
   level:
     root: INFO
