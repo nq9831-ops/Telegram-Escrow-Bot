@@ -24,6 +24,7 @@
 package com.tg.escrow;
 
 import com.tg.escrow.core.BannedWordRegistry;
+import com.tg.escrow.core.IncomingMessage;
 import com.tg.escrow.core.KeywordAutoReply;
 import com.tg.escrow.core.ModerationOrchestrator;
 import com.tg.escrow.escrow.AmountTierPolicy;
@@ -45,6 +46,7 @@ import com.tg.escrow.escrow.TradeReviewStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
+import org.telegram.telegrambots.meta.api.objects.Document;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.chat.Chat;
@@ -324,5 +326,60 @@ class TelegramBotHandlerTest {
 
         assertThat(reply.texts).isEmpty();
         assertThat(reply.acks).isEmpty();
+    }
+
+    // ── 入站消息映射（Wave 2）──────────────────────────────────────────────
+
+    private static Message rawMessage(long chatId, long userId, int messageId, String text) {
+        Message message = new Message();
+        message.setMessageId(messageId);
+        message.setChat(new Chat(chatId, "supergroup"));
+        message.setFrom(new User(userId, "tester", false));
+        message.setText(text);
+        return message;
+    }
+
+    @Test
+    @DisplayName("文本消息 → 映射保真（群/用户/消息号/文本），媒体为 NONE")
+    void mapsTextMessage() {
+        IncomingMessage mapped = TelegramBotHandler.toIncoming(rawMessage(100L, 4242L, 77, "你好"));
+
+        assertThat(mapped.chatId()).isEqualTo(100L);
+        assertThat(mapped.userId()).isEqualTo(4242L);
+        assertThat(mapped.messageId()).isEqualTo(77);
+        assertThat(mapped.text()).isEqualTo("你好");
+        assertThat(mapped.mediaKind()).isEqualTo(IncomingMessage.MediaKind.NONE);
+        assertThat(mapped.hasMedia()).isFalse();
+    }
+
+    @Test
+    @DisplayName("文档消息 → DOCUMENT 且带出文件名与 MIME（媒体过滤的输入）")
+    void mapsDocumentMessage() {
+        Message message = rawMessage(100L, 4242L, 78, null);
+        Document document = new Document();
+        document.setFileName("payload.exe");
+        document.setMimeType("application/octet-stream");
+        message.setDocument(document);
+
+        IncomingMessage mapped = TelegramBotHandler.toIncoming(message);
+
+        assertThat(mapped.mediaKind()).isEqualTo(IncomingMessage.MediaKind.DOCUMENT);
+        assertThat(mapped.fileName()).isEqualTo("payload.exe");
+        assertThat(mapped.mimeType()).isEqualTo("application/octet-stream");
+        assertThat(mapped.hasFileInfo()).isTrue();
+        assertThat(mapped.text()).isNull();
+    }
+
+    @Test
+    @DisplayName("图片消息 → PHOTO，且无文件信息（不得拿空值当违规）")
+    void mapsPhotoMessage() {
+        Message message = rawMessage(100L, 4242L, 79, null);
+        message.setPhoto(java.util.List.of(
+                org.mockito.Mockito.mock(org.telegram.telegrambots.meta.api.objects.photo.PhotoSize.class)));
+
+        IncomingMessage mapped = TelegramBotHandler.toIncoming(message);
+
+        assertThat(mapped.mediaKind()).isEqualTo(IncomingMessage.MediaKind.PHOTO);
+        assertThat(mapped.hasFileInfo()).isFalse();
     }
 }

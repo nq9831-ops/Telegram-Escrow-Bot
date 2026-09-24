@@ -28,6 +28,7 @@ import com.tg.escrow.core.BannedWordMatcher;
 import com.tg.escrow.core.BannedWordRegistry;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.core.CommandParser;
+import com.tg.escrow.core.IncomingMessage;
 import com.tg.escrow.core.KeywordAutoReply;
 
 import java.util.Optional;
@@ -91,6 +92,20 @@ public final class BotDispatcher {
      * @param actor  发起人
      * @return 回执（正文 + 是否附「打开表单」入口）；{@code null} 表示<b>不响应</b>
      */
+    /**
+     * 入站消息重载（Wave 2）：把消息元信息（消息号/媒体/文件名）带下来，供内容安全判定使用。
+     *
+     * <p>命令与自动回复都只需要文本，故当前委托到旧签名；内容安全判定在下一波接入此处。
+     * 之所以现在就把重载立起来：检测器需要消息号（删消息）与媒体信息，而旧签名根本拿不到——
+     * 这正是那三个守卫此前零引用的原因。
+     */
+    public BotReply handle(IncomingMessage message, CommandActor actor) {
+        if (message == null) {
+            throw new TggException("命令分发：消息不可为空");
+        }
+        return handle(message.chatId(), message.text(), actor);
+    }
+
     public BotReply handle(long chatId, String text, CommandActor actor) {
         if (text == null || actor == null) {
             return null;

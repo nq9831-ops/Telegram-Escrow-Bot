@@ -24,9 +24,12 @@
 package com.tg.escrow;
 
 import com.tg.escrow.core.CommandActor;
+import com.tg.escrow.core.IncomingMessage;
 import com.tg.escrow.core.MemberRole;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
+import org.telegram.telegrambots.meta.api.objects.Document;
 import org.telegram.telegrambots.meta.api.objects.Update;
+import org.telegram.telegrambots.meta.api.objects.message.Message;
 
 /**
  * Telegram Bot 接线（S1）：Update → 分发器 → 回执。纯胶水，不含业务判断。
@@ -89,6 +92,50 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
     /** 本 bot 用户名（不含 {@code @}）。 */
     public String getBotUsername() {
         return botUsername;
+    }
+
+    /**
+     * 把 Telegram 的 {@link Message} 映射成本项目的 {@link IncomingMessage}（Wave 2）。
+     *
+     * <p>包级可见，供单测直接打表——映射是最容易悄悄错的一环（媒体类型判错会让过滤
+     * 形同虚设、或误杀正常消息），必须能被独立验证，而不是只能靠真机观察。
+     *
+     * @throws com.tg.escrow.common.TggException 消息为空或缺少 ID（缺 ID 则处置时无法定位）
+     */
+    static IncomingMessage toIncoming(Message message) {
+        if (message == null) {
+            throw new com.tg.escrow.common.TggException("Bot 接线：消息不可为空");
+        }
+        Integer messageId = message.getMessageId();
+        if (messageId == null) {
+            throw new com.tg.escrow.common.TggException("Bot 接线：消息缺少 ID（处置时无法定位）");
+        }
+        long chatId = message.getChat() == null ? 0L : message.getChatId();
+        long userId = message.getFrom() == null ? 0L : message.getFrom().getId();
+        Document document = message.getDocument();
+
+        return new IncomingMessage(chatId, userId, messageId, message.getText(),
+                mediaKindOf(message),
+                document == null ? null : document.getFileName(),
+                document == null ? null : document.getMimeType());
+    }
+
+    /** Telegram 的媒体字段 → 本项目的媒体种类。无媒体即 {@code NONE}。 */
+    private static IncomingMessage.MediaKind mediaKindOf(Message message) {
+        if (message.hasDocument()) {
+            return IncomingMessage.MediaKind.DOCUMENT;
+        }
+        if (message.hasPhoto()) {
+            return IncomingMessage.MediaKind.PHOTO;
+        }
+        if (message.hasVideo()) {
+            return IncomingMessage.MediaKind.VIDEO;
+        }
+        if (message.hasAudio() || message.hasVoice() || message.hasSticker()
+                || message.hasVideoNote()) {
+            return IncomingMessage.MediaKind.OTHER;
+        }
+        return IncomingMessage.MediaKind.NONE;
     }
 
     @Override
