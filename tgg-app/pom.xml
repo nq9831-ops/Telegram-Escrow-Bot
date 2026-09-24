@@ -47,6 +47,15 @@
       <version>10.3.0</version>
     </dependency>
 
+    <!-- Telegram 发消息客户端（S1）：TelegramClient 接口的实现（OkHttpTelegramClient）。
+         longpolling 只负责「收」，发消息必须用 client——它不在 longpolling 的传递依赖里
+         （longpolling 只传递 meta/okhttp/lombok），漏了它 BotReplyPort 就没有实现可用。 -->
+    <dependency>
+      <groupId>org.telegram</groupId>
+      <artifactId>telegrambots-client</artifactId>
+      <version>10.3.0</version>
+    </dependency>
+
     <!-- Admin API（S6）：违禁词在线管理等后台端点。 -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
