@@ -85,4 +85,15 @@ class MiniAppPageTest {
         assertThat(html).contains("initData:");
         assertThat(html).doesNotContain("userId");
     }
+
+    @Test
+    @DisplayName("币种下拉只保留白名单 TON / USDT（Wave 0：其余币种不再出现在页面）")
+    void currencyOptionsAreWhitelisted() throws IOException {
+        String html = page();
+        assertThat(html).contains("<option value=\"TON\"");
+        assertThat(html).contains("<option value=\"USDT\"");
+        assertThat(html)
+                .as("白名单外的币种不应再出现在页面（服务端亦 fail-closed 拒绝）")
+                .doesNotContain("BTC", "ETH", "USDC");
+    }
 }

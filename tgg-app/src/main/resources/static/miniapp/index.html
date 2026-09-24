@@ -74,11 +74,9 @@
 
     <label for="currency">币种</label>
     <select id="currency" name="currency" required>
-      <option value="USDT">USDT</option>
+      <!-- 币种白名单（Wave 0）：只结算 TON 与 TON 链上的 USDT；value 须与服务端 TradeCurrency 一致 -->
       <option value="TON">TON</option>
-      <option value="USDC">USDC</option>
-      <option value="BTC">BTC</option>
-      <option value="ETH">ETH</option>
+      <option value="USDT">USDT（TON 链）</option>
     </select>
 
     <div id="risk"></div>

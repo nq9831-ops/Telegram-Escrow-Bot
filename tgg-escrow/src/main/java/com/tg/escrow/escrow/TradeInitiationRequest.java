@@ -14,7 +14,7 @@ import java.math.BigDecimal;
  * @param buyerId  买方 ID（也是准入检查的对象）
  * @param sellerId 卖方 ID
  * @param amount   交易金额（必须为正）
- * @param currency 币种（不得空白）
+ * @param currency 币种（须落在 TON / USDT(TON 链) 白名单内；大小写与空白会归一）
  */
 public record TradeInitiationRequest(long buyerId, long sellerId, BigDecimal amount,
                                      String currency) {
@@ -33,5 +33,8 @@ public record TradeInitiationRequest(long buyerId, long sellerId, BigDecimal amo
         if (currency == null || currency.isBlank()) {
             throw new EscrowException("交易创建：币种未提供");
         }
+        // 币种白名单（Wave 0）：TON / USDT(TON 链) 之外一律拒，并归一为规范形式。
+        // 收口在此一处，命令层（TradeCommandHandler）与 /api/trade/create 同受约束。
+        currency = TradeCurrency.requireSupported(currency).name();
     }
 }
