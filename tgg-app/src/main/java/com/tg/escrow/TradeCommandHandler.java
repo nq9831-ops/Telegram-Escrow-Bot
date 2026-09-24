@@ -28,6 +28,7 @@ import com.tg.escrow.common.TggException;
 import com.tg.escrow.core.BotCommand;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.escrow.AmountTierPolicy;
+import com.tg.escrow.escrow.ConcurrentOrderUpdateException;
 import com.tg.escrow.escrow.EscrowOrder;
 import com.tg.escrow.escrow.EscrowOrderLookupPort;
 import com.tg.escrow.escrow.EscrowTradeService;
@@ -206,6 +207,9 @@ public final class TradeCommandHandler {
         }
         try {
             service.cancel(order, actor.userId());
+        } catch (ConcurrentOrderUpdateException ex) {
+            // 并发冲突与"无权限/状态不符"是两回事：前者重查后重试有意义，不能笼统说"无法取消"
+            return "订单 #" + orderId + " 已被他人变更，请重查后再操作";
         } catch (EscrowException ex) {
             return "无法取消：" + ex.getMessage();
         }

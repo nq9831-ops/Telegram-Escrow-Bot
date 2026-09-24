@@ -28,6 +28,7 @@ import com.tg.escrow.core.BotCommand;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.core.MemberRole;
 import com.tg.escrow.escrow.AmountTierPolicy;
+import com.tg.escrow.escrow.ConcurrentOrderUpdateException;
 import com.tg.escrow.escrow.EscrowOrder;
 import com.tg.escrow.escrow.EscrowOrderLookupPort;
 import com.tg.escrow.escrow.EscrowOrderStore;
@@ -72,9 +73,19 @@ class TradeCommandHandlerTest {
     private static final class InMemoryStore implements EscrowOrderStore, EscrowOrderLookupPort {
         private final java.util.Map<Long, EscrowOrder> byId = new java.util.HashMap<>();
         private long seq;
+        private boolean conflictOnNextSave;
+
+        /** 让下一次 save 抛并发冲突（模拟乐观锁失败，无需真实并发）。 */
+        void failNextSaveWithConflict() {
+            conflictOnNextSave = true;
+        }
 
         @Override
         public EscrowOrder save(EscrowOrder order) {
+            if (conflictOnNextSave) {
+                conflictOnNextSave = false;
+                throw new ConcurrentOrderUpdateException("订单已被他人变更（并发写入冲突），请重查后重试");
+            }
             order.assignId(++seq);
             byId.put(order.getId(), order);
             return order;
@@ -100,6 +111,24 @@ class TradeCommandHandlerTest {
 
     private static BotCommand cancelCmd(String orderId) {
         return new BotCommand("escrow", List.of("cancel", orderId));
+    }
+
+    /** 装配结果：handler + 其内部 store（并发冲突测试需要操纵 store）。 */
+    private record Wiring(TradeCommandHandler handler, InMemoryStore store) {
+    }
+
+    private static Wiring wiring(int maxConcurrent, Duration cooldown, TradeAdmissionContext ctx) {
+        TradeAdmissionGate gate = new TradeAdmissionGate(
+                new TradeAdmissionPolicy(maxConcurrent, cooldown));
+        TradeHistoryPort history = id -> new TradeAdmissionContext(
+                id, ctx.activeTradeCount(), ctx.lastCompletedTradeAt(), ctx.hasUnresolvedDispute());
+        Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
+        InMemoryStore store = new InMemoryStore();
+        return new Wiring(new TradeCommandHandler(
+                new EscrowTradeService(gate, history, store, clock),
+                new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
+                new PendingTradeRegistry(PENDING_TTL, clock),
+                store), store);
     }
 
     /** 用真实 gate + 真实 service + 真实 registry 装配 handler。ctx 决定门禁看到的事实。 */
@@ -318,5 +347,19 @@ class TradeCommandHandlerTest {
         TradeCommandHandler h = handler(5, Duration.ZERO, clean());
 
         assertThat(h.handle(cancelCmd("999"), ACTOR)).contains("不存在");
+    }
+
+    @Test
+    @DisplayName("cancel 并发冲突：订单已被他人变更 → 提示重查，且不谎报已取消")
+    void cancelReportsConcurrentConflict() {
+        Wiring w = wiring(5, Duration.ZERO, clean());
+        w.handler().handle(createCmd("2002", "100", "USDT"), ACTOR);
+        w.handler().handle(confirmCmd("2002", "100", "USDT"), ACTOR);
+        w.store().failNextSaveWithConflict();   // 模拟：读之后订单被别人改过
+
+        String out = w.handler().handle(cancelCmd("1"), ACTOR);
+
+        assertThat(out).contains("已被他人变更").contains("重查");
+        assertThat(out).doesNotContain("已取消");   // 冲突时绝不能报成功
     }
 }

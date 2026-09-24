@@ -31,6 +31,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -104,6 +105,17 @@ public class EscrowOrder {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false)
     private Long id;
+
+    /**
+     * 乐观锁版本号（JPA {@code @Version}）。
+     *
+     * <p>订单是「读 → 判状态 → 改状态 → 写回」的形态，并发下两个操作者可能读到同一快照；
+     * 没有版本号时后写者会<b>静默覆盖</b>先写者（例如买方 cancel 覆盖卖方的 markDelivered，
+     * 留下状态自相矛盾的订单）。加上它之后，提交期版本不一致即失败——宁可让一方重查。
+     */
+    @Version
+    @Column(name = "version", nullable = false)
+    private long version;
 
     @Column(name = "buyer_user_id", nullable = false)
     private long buyerUserId;
