@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>发起担保交易</title>
+  <!-- Telegram 官方 Mini App SDK：必须 HTTPS 加载，提供 window.Telegram.WebApp -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --text: #000000;
+      --hint: #707579;
+      --btn: #2481cc;
+      --btn-text: #ffffff;
+      --secondary-bg: #f4f4f5;
+      --danger: #c0392b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    h1 { font-size: 18px; margin: 4px 0 16px; }
+    label { display: block; font-size: 14px; margin: 12px 0 4px; color: var(--hint); }
+    input, select {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border: 1px solid var(--secondary-bg);
+      border-radius: 10px;
+      background: var(--secondary-bg);
+      color: var(--text);
+    }
+    #risk {
+      margin: 16px 0 8px;
+      padding: 12px;
+      border-radius: 10px;
+      background: var(--secondary-bg);
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--hint);
+    }
+    #risk.strong { color: var(--danger); font-weight: 600; }
+    button#submit {
+      width: 100%;
+      padding: 14px;
+      margin-top: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      background: var(--btn);
+      color: var(--btn-text);
+    }
+    button#submit:disabled { opacity: .5; }
+    #result { margin-top: 16px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+    #result.ok { color: #2e7d32; }
+    #result.err { color: var(--danger); }
+  </style>
+</head>
+<body>
+  <h1>发起担保交易</h1>
+
+  <form id="form">
+    <label for="sellerId">对方用户 ID</label>
+    <input id="sellerId" name="sellerId" type="number" inputmode="numeric" min="1" placeholder="例如 2002" required>
+
+    <label for="amount">金额</label>
+    <input id="amount" name="amount" type="text" inputmode="decimal" placeholder="例如 100" required>
+
+    <label for="currency">币种</label>
+    <select id="currency" name="currency" required>
+      <option value="USDT">USDT</option>
+      <option value="TON">TON</option>
+      <option value="USDC">USDC</option>
+      <option value="BTC">BTC</option>
+      <option value="ETH">ETH</option>
+    </select>
+
+    <div id="risk"></div>
+    <button id="submit" type="submit">创建交易</button>
+  </form>
+
+  <div id="result" role="status" aria-live="polite"></div>
+
+  <script>
+    (function () {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      if (!tg) {
+        document.getElementById('result').className = 'err';
+        document.getElementById('result').textContent = '请在 Telegram 内打开本页面。';
+        return;
+      }
+      tg.ready();
+      tg.expand();
+
+      // 跟随 Telegram 主题（themeParams 为十六进制颜色）
+      var p = tg.themeParams || {};
+      var root = document.documentElement.style;
+      if (p.bg_color) root.setProperty('--bg', p.bg_color);
+      if (p.text_color) root.setProperty('--text', p.text_color);
+      if (p.hint_color) root.setProperty('--hint', p.hint_color);
+      if (p.button_color) root.setProperty('--btn', p.button_color);
+      if (p.button_text_color) root.setProperty('--btn-text', p.button_text_color);
+      if (p.secondary_bg_color) root.setProperty('--secondary-bg', p.secondary_bg_color);
+
+      // BackButton → 关闭
+      if (tg.BackButton) {
+        tg.BackButton.show();
+        tg.BackButton.onClick(function () { tg.close(); });
+      }
+
+      var riskEl = document.getElementById('risk');
+      riskEl.textContent = '提交前请确认：对方身份、金额与币种。创建后可自行核对风险提示。';
+
+      var form = document.getElementById('form');
+      var btn = document.getElementById('submit');
+      var out = document.getElementById('result');
+
+      form.addEventListener('submit', function (ev) {
+        ev.preventDefault();
+        out.textContent = '';
+        out.className = '';
+
+        var sellerId = parseInt(document.getElementById('sellerId').value, 10);
+        var amount = document.getElementById('amount').value.trim();
+        var currency = document.getElementById('currency').value;
+
+        if (!sellerId || sellerId <= 0 || !amount) {
+          out.className = 'err';
+          out.textContent = '请填写对方用户 ID 与金额。';
+          return;
+        }
+
+        // 身份只来自 Telegram 签发的原始串；服务端验签，请求体里没有用户 ID 字段
+        var payload = {
+          initData: tg.initData,
+          sellerId: sellerId,
+          amount: amount,
+          currency: currency
+        };
+
+        btn.disabled = true;
+        btn.textContent = '提交中…';
+
+        fetch('/api/trade/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        })
+          .then(function (r) { return r.json().catch(function () { return null; }); })
+          .then(function (body) {
+            if (body && body.ok) {
+              out.className = 'ok';
+              out.textContent = '已创建订单 #' + body.orderId + '\n' + (body.riskPrompt || '');
+              if (body.riskPrompt) {
+                riskEl.textContent = '风险提示：' + body.riskPrompt;
+                riskEl.className = 'strong';
+              }
+            } else {
+              out.className = 'err';
+              out.textContent = (body && body.error) ? body.error : '创建失败，请稍后重试。';
+            }
+          })
+          .catch(function () {
+            out.className = 'err';
+            out.textContent = '网络异常，请稍后重试。';
+          })
+          .finally(function () {
+            btn.disabled = false;
+            btn.textContent = '创建交易';
+          });
+      });
+    })();
+  </script>
+</body>
+</html>
