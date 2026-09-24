@@ -121,4 +121,32 @@ class WarningOrchestratorTest {
                 .isInstanceOf(TggException.class);
         assertThat(port.calls).isEmpty();
     }
+
+    @Test
+    @DisplayName("【缺陷复现】普通成员即便未达阈值也不得记警告（现状会静默放过）")
+    void memberCannotWarnBelowThreshold() {
+        FakePort port = new FakePort();
+        WarningOrchestrator w = new WarningOrchestrator(new WarningPolicy(3, 5),
+                new ModerationOrchestrator(port), Duration.ofMinutes(10));
+
+        org.assertj.core.api.Assertions.assertThatThrownBy(() -> w.handle(1L,
+                new CommandActor(10L, MemberRole.MEMBER), 21L, MemberRole.MEMBER, 0))
+                .as("未达阈值时判罚为 NONE，但「记警告」本身仍是处置行为——"
+                        + "守卫若只存在于 mute/kick 内部，普通成员就能把别人的警告数刷到判罚线")
+                .isInstanceOf(TggException.class);
+        assertThat(port.calls).isEmpty();
+    }
+
+    @Test
+    @DisplayName("管理员未达阈值 → 正常返回 NONE 且零处置调用（修缺口不得误伤正常路径）")
+    void adminBelowThresholdIsNoop() {
+        FakePort port = new FakePort();
+        WarningOrchestrator w = new WarningOrchestrator(new WarningPolicy(3, 5),
+                new ModerationOrchestrator(port), Duration.ofMinutes(10));
+
+        Action action = w.handle(1L, new CommandActor(10L, MemberRole.ADMIN), 21L, MemberRole.MEMBER, 0);
+
+        assertThat(action).isEqualTo(Action.NONE);
+        assertThat(port.calls).isEmpty();
+    }
 }

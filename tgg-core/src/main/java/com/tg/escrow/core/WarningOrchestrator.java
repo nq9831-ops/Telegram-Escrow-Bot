@@ -63,15 +63,21 @@ public final class WarningOrchestrator {
     /**
      * 记录警告并按阈值处置。
      *
+     * <p><b>入口即要求管理员</b>：记录警告本身是一项处置行为，即使累计数未达阈值
+     * （判罚为 {@code NONE}）也必须先过权限关。此前守卫只存在于 {@code mute}/{@code kick}
+     * 内部，导致<b>未达阈值时一次权限检查都不发生</b>——任何人都能把别人的警告数刷到判罚线。
+     *
      * @param guildId        群
-     * @param actor          处置执行者（仍受单调守卫约束）
+     * @param actor          处置执行者（须为管理员及以上；仍受单调守卫约束）
      * @param targetId       被警告用户
      * @param targetRole     被警告用户角色
      * @param currentWarnings 当前累计警告数（调用方从 {@code WarningPort} 取）
      * @return 判罚动作
+     * @throws TggException 执行者缺失、或权限不足
      */
     public Action handle(long guildId, CommandActor actor, long targetId,
                          MemberRole targetRole, int currentWarnings) {
+        requireAdmin(actor);
         Action action = policy.actionFor(currentWarnings);
         switch (action) {
             case MUTE -> moderation.mute(guildId, actor, targetId, targetRole, defaultMuteDuration);
@@ -79,5 +85,14 @@ public final class WarningOrchestrator {
             case NONE -> { /* 不预罚 */ }
         }
         return action;
+    }
+
+    private static void requireAdmin(CommandActor actor) {
+        if (actor == null) {
+            throw new TggException("警告处置：执行者未提供");
+        }
+        if (!actor.role().isAtLeast(MemberRole.ADMIN)) {
+            throw new TggException("警告处置：普通成员无权警告他人");
+        }
     }
 }
