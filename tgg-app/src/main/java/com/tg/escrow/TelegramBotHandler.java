@@ -54,24 +54,31 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
     private final BotReplyPort reply;
     private final String botUsername;
     private final String webAppUrl;
+    private final com.tg.escrow.core.MemberRolePort memberRolePort;
 
     /**
-     * @param tokenConfig token 配置（构造期已 fail-fast）
-     * @param dispatcher  命令分发器
-     * @param reply       回复出口（TelegramClient 适配器实现）
-     * @param botUsername 本 bot 用户名（不含 {@code @}）
-     * @param webAppUrl   Mini App 表单地址（HTTPS）；为空则「引导表单」的回执退化为纯文本、不带按钮
+     * @param tokenConfig    token 配置（构造期已 fail-fast）
+     * @param dispatcher     命令分发器
+     * @param reply          回复出口（TelegramClient 适配器实现）
+     * @param botUsername    本 bot 用户名（不含 {@code @}）
+     * @param webAppUrl      Mini App 表单地址（HTTPS）；为空则「引导表单」的回执退化为纯文本、不带按钮
+     * @param memberRolePort 群内角色查询端口（Wave 1：真实角色，替代此前的硬编码 MEMBER）
      */
     public TelegramBotHandler(BotTokenConfig tokenConfig, BotDispatcher dispatcher,
-                             BotReplyPort reply, String botUsername, String webAppUrl) {
+                             BotReplyPort reply, String botUsername, String webAppUrl,
+                             com.tg.escrow.core.MemberRolePort memberRolePort) {
         if (tokenConfig == null || dispatcher == null || reply == null) {
             throw new com.tg.escrow.common.TggException("Bot 接线：token/分发器/回复出口均不可为空");
+        }
+        if (memberRolePort == null) {
+            throw new com.tg.escrow.common.TggException("Bot 接线：角色查询端口不可为空（缺它则处置权限判不了）");
         }
         this.tokenConfig = tokenConfig;
         this.dispatcher = dispatcher;
         this.reply = reply;
         this.botUsername = botUsername;
         this.webAppUrl = webAppUrl;
+        this.memberRolePort = memberRolePort;
     }
 
     /** bot token（10.x 架构中 token 由注册方（TelegramBotsLongPollingApplication）持有，非接口方法）。 */
@@ -95,8 +102,8 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
                 long chatId = update.getMessage().getChatId();
                 long userId = update.getMessage().getFrom() != null
                         ? update.getMessage().getFrom().getId() : 0L;
-                // 角色保守取 MEMBER：权限只能收紧，不放松（真实角色上线接入后升级）
-                CommandActor actor = new CommandActor(userId, MemberRole.MEMBER);
+                // 角色取自群内真实状态（查不到即退 MEMBER——权限只收紧不放松）
+                CommandActor actor = new CommandActor(userId, memberRolePort.roleOf(chatId, userId));
                 String text = update.getMessage().getText();
                 BotReply out = dispatcher.handle(chatId, text, actor);
                 if (out != null && out.text() != null) {

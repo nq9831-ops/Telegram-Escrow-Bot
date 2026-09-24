@@ -25,6 +25,7 @@ package com.tg.escrow;
 
 import com.tg.escrow.core.BannedWordRegistry;
 import com.tg.escrow.core.KeywordAutoReply;
+import com.tg.escrow.core.MemberRolePort;
 import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowOrder;
 import com.tg.escrow.escrow.EscrowOrderLookupPort;
@@ -53,6 +54,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.telegram.telegrambots.client.okhttp.OkHttpTelegramClient;
+import org.telegram.telegrambots.meta.generics.TelegramClient;
 
 import java.math.BigDecimal;
 import java.time.Clock;
@@ -228,10 +230,24 @@ public class BotWiring {
         return BotTokenConfig.from(System::getenv);
     }
 
+    /**
+     * Telegram 客户端——<b>回复出口与角色查询共用同一个实例</b>（各自 new 一份会开两套连接池）。
+     */
+    @Bean
+    public TelegramClient telegramClient(BotTokenConfig tokenConfig) {
+        return new OkHttpTelegramClient(tokenConfig.token());
+    }
+
     /** 回复出口：Telegram 依赖的唯一落点。 */
     @Bean
-    public BotReplyPort botReplyPort(BotTokenConfig tokenConfig) {
-        return new TelegramBotReplyAdapter(new OkHttpTelegramClient(tokenConfig.token()));
+    public BotReplyPort botReplyPort(TelegramClient client) {
+        return new TelegramBotReplyAdapter(client);
+    }
+
+    /** 群内角色查询（Wave 1）：替代此前 Bot 接线里硬编码的 MEMBER。 */
+    @Bean
+    public MemberRolePort memberRolePort(TelegramClient client) {
+        return new TelegramMemberRoleAdapter(client);
     }
 
     @Bean
@@ -247,7 +263,8 @@ public class BotWiring {
                                                  BotDispatcher dispatcher,
                                                  BotReplyPort reply,
                                                  @Value("${tgg.bot.username}") String botUsername,
-                                                 @Value("${tgg.webapp.url:}") String webAppUrl) {
-        return new TelegramBotHandler(tokenConfig, dispatcher, reply, botUsername, webAppUrl);
+                                                 @Value("${tgg.webapp.url:}") String webAppUrl,
+                                                 MemberRolePort memberRolePort) {
+        return new TelegramBotHandler(tokenConfig, dispatcher, reply, botUsername, webAppUrl, memberRolePort);
     }
 }

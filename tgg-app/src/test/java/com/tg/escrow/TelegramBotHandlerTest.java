@@ -182,7 +182,8 @@ class TelegramBotHandlerTest {
         BotDispatcher dispatcher = new BotDispatcher(trade, "mybot",
                 new BannedWordRegistry(), new KeywordAutoReply());
         return new TelegramBotHandler(BotTokenConfig.from(k -> "123456:TESTTOKEN"), dispatcher,
-                reply, "mybot", webAppUrl);
+                reply, "mybot", webAppUrl,
+                (chatId, userId) -> com.tg.escrow.core.MemberRole.MEMBER);
     }
 
     private static Update textUpdate(long chatId, long userId, String text) {
