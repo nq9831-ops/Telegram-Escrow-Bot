@@ -358,6 +358,35 @@ public class BotWiring {
                 .toList();
     }
 
+    /** 欢迎语模板（Wave 2）：新成员入群时按模板渲染；变量缺失时保守处理由模板自身保证。 */
+    @Bean
+    public com.tg.escrow.core.WelcomeTemplate welcomeTemplate(
+            @Value("${tgg.welcome.template:欢迎 {username} 加入 {group}！}") String template) {
+        return new com.tg.escrow.core.WelcomeTemplate(template);
+    }
+
+    /**
+     * 保护模式（Wave 2）：开启时应拒绝新入群。
+     *
+     * <p>默认<b>关闭</b>——开启会把所有人挡在门外，不该是默认状态。
+     */
+    @Bean
+    public com.tg.escrow.core.ProtectionMode protectionMode(
+            @Value("${tgg.protection.enabled:false}") boolean enabled) {
+        com.tg.escrow.core.ProtectionMode mode = new com.tg.escrow.core.ProtectionMode();
+        if (enabled) {
+            mode.enable("启动配置 tgg.protection.enabled=true");
+        }
+        return mode;
+    }
+
+    /** 入群处理（保护模式 → 欢迎或拦截）。 */
+    @Bean
+    public MemberJoinHandler memberJoinHandler(com.tg.escrow.core.ProtectionMode protection,
+                                               com.tg.escrow.core.WelcomeTemplate welcome) {
+        return new MemberJoinHandler(protection, welcome);
+    }
+
     @Bean
     public BotDispatcher botDispatcher(TradeCommandHandler tradeHandler,
                                        BannedWordRegistry bannedWords,
@@ -375,7 +404,9 @@ public class BotWiring {
                                                  BotReplyPort reply,
                                                  @Value("${tgg.bot.username}") String botUsername,
                                                  @Value("${tgg.webapp.url:}") String webAppUrl,
-                                                 MemberRolePort memberRolePort) {
-        return new TelegramBotHandler(tokenConfig, dispatcher, reply, botUsername, webAppUrl, memberRolePort);
+                                                 MemberRolePort memberRolePort,
+                                                 MemberJoinHandler memberJoinHandler) {
+        return new TelegramBotHandler(tokenConfig, dispatcher, reply, botUsername, webAppUrl,
+                memberRolePort, memberJoinHandler);
     }
 }

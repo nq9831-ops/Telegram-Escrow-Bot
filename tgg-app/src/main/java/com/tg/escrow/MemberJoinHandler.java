@@ -1,0 +1,81 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 telegram-escrow-bot contributors
+ *
+ * This file is part of telegram-escrow-bot.
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License only.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * NOTE: the SPDX identifier is AGPL-3.0-only because the LICENSE file in this
+ * repository carries the plain AGPL v3 text without an "or later" grant. If you
+ * intend to allow later versions, change this line to AGPL-3.0-or-later and
+ * make the LICENSE wording match — the two must not disagree.
+ */
+package com.tg.escrow;
+
+import com.tg.escrow.common.TggException;
+import com.tg.escrow.core.MemberJoined;
+import com.tg.escrow.core.ProtectionMode;
+import com.tg.escrow.core.WelcomeTemplate;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Optional;
+
+/**
+ * 新成员入群处理（Wave 2）——把 {@link ProtectionMode} 与 {@link WelcomeTemplate}
+ * 这两个此前零生产消费者的类接上入群路径。
+ *
+ * <h2>顺序：先判保护模式，再欢迎</h2>
+ * <p>保护模式开启时<b>不发欢迎语</b>——向一个本该被拦下的人说"欢迎"是自相矛盾的信号，
+ * 也让管理员看不出拦截是否生效。
+ *
+ * <h2>变量的诚实处理</h2>
+ * <p>显示名/群名缺失时传空串而不是 {@code null}：{@link WelcomeTemplate#render} 对缺失变量
+ * 是保守的（不泄漏 {@code {...}} 原文），但传 {@code null} 会变成"变量存在、值为空"，
+ * 渲染出空洞的欢迎语。宁可显式传空串，让模板作者自行决定兜底文案。
+ */
+public final class MemberJoinHandler {
+
+    private final ProtectionMode protection;
+    private final WelcomeTemplate welcome;
+
+    public MemberJoinHandler(ProtectionMode protection, WelcomeTemplate welcome) {
+        if (protection == null || welcome == null) {
+            throw new TggException("入群处理：保护模式与欢迎模板均不可为空");
+        }
+        this.protection = protection;
+        this.welcome = welcome;
+    }
+
+    /**
+     * 处理一次入群。
+     *
+     * @param joined 入群事件
+     * @return 应发出的回执；{@code null} 语义不适用，恒为 present
+     */
+    public Optional<String> onMemberJoined(MemberJoined joined) {
+        if (joined == null) {
+            throw new TggException("入群处理：事件不可为空");
+        }
+        if (protection.shouldRejectJoin()) {
+            String reason = protection.reason();
+            return Optional.of("⚠️ 本群正处于保护模式" + (reason == null || reason.isBlank()
+                    ? "" : "（" + reason + "）") + "，暂不接受新成员。请管理员确认情况后关闭保护模式。");
+        }
+        Map<String, String> vars = new HashMap<>();
+        vars.put("username", joined.userName() == null ? "" : joined.userName());
+        vars.put("group", joined.chatTitle() == null ? "" : joined.chatTitle());
+        return Optional.of(welcome.render(vars));
+    }
+}

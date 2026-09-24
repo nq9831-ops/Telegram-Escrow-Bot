@@ -26,9 +26,11 @@ package com.tg.escrow;
 import com.tg.escrow.core.ChatKind;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.core.IncomingMessage;
+import com.tg.escrow.core.MemberJoined;
 import com.tg.escrow.core.MemberRole;
 import org.telegram.telegrambots.longpolling.util.LongPollingSingleThreadUpdateConsumer;
 import org.telegram.telegrambots.meta.api.objects.Document;
+import org.telegram.telegrambots.meta.api.objects.User;
 import org.telegram.telegrambots.meta.api.objects.chat.Chat;
 import org.telegram.telegrambots.meta.api.objects.Update;
 import org.telegram.telegrambots.meta.api.objects.message.Message;
@@ -60,6 +62,7 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
     private final String botUsername;
     private final String webAppUrl;
     private final com.tg.escrow.core.MemberRolePort memberRolePort;
+    private final MemberJoinHandler memberJoinHandler;
 
     /**
      * @param tokenConfig    token 配置（构造期已 fail-fast）
@@ -71,12 +74,16 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
      */
     public TelegramBotHandler(BotTokenConfig tokenConfig, BotDispatcher dispatcher,
                              BotReplyPort reply, String botUsername, String webAppUrl,
-                             com.tg.escrow.core.MemberRolePort memberRolePort) {
+                             com.tg.escrow.core.MemberRolePort memberRolePort,
+                             MemberJoinHandler memberJoinHandler) {
         if (tokenConfig == null || dispatcher == null || reply == null) {
             throw new com.tg.escrow.common.TggException("Bot 接线：token/分发器/回复出口均不可为空");
         }
         if (memberRolePort == null) {
             throw new com.tg.escrow.common.TggException("Bot 接线：角色查询端口不可为空（缺它则处置权限判不了）");
+        }
+        if (memberJoinHandler == null) {
+            throw new com.tg.escrow.common.TggException("Bot 接线：入群处理器不可为空（缺它则入群事件无人接）");
         }
         this.tokenConfig = tokenConfig;
         this.dispatcher = dispatcher;
@@ -84,6 +91,7 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
         this.botUsername = botUsername;
         this.webAppUrl = webAppUrl;
         this.memberRolePort = memberRolePort;
+        this.memberJoinHandler = memberJoinHandler;
     }
 
     /** bot token（10.x 架构中 token 由注册方（TelegramBotsLongPollingApplication）持有，非接口方法）。 */
@@ -162,6 +170,37 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
     }
 
     /**
+     * 这条消息是否带来新成员。
+     *
+     * <p>此前门禁完全不看 {@code new_chat_members}，入群事件<b>整条被跳过</b>——
+     * {@code WelcomeTemplate} 与 {@code ProtectionMode} 因此永无上场机会。
+     */
+    private static boolean hasNewMembers(Message message) {
+        return message.getNewChatMembers() != null && !message.getNewChatMembers().isEmpty();
+    }
+
+    /** 逐个新成员处理（一次可能被拉进多人）。 */
+    private void handleMemberJoin(Message message) {
+        String title = message.getChat() == null ? null : message.getChat().getTitle();
+        for (User newMember : message.getNewChatMembers()) {
+            if (Boolean.TRUE.equals(newMember.getIsBot())) {
+                continue;   // bot 自己入群也会出现在此列表，不必自我欢迎
+            }
+            memberJoinHandler.onMemberJoined(new MemberJoined(
+                            message.getChatId(), title, newMember.getId(), displayNameOf(newMember)))
+                    .ifPresent(text -> reply.sendText(message.getChatId(), text));
+        }
+    }
+
+    /** 显示名优先取 first name（用户可能没设 @username）。 */
+    private static String displayNameOf(User user) {
+        if (user.getFirstName() != null && !user.getFirstName().isBlank()) {
+            return user.getFirstName();
+        }
+        return user.getUserName() == null ? "" : user.getUserName();
+    }
+
+    /**
      * 这条消息是否值得处理：有文本（命令/自动回复需要）<b>或</b>有媒体（内容安全过滤需要）。
      *
      * <p>此前只看 {@code hasText()}，于是带链接说明的纯图片/文件消息会整条被跳过——
@@ -180,7 +219,9 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
         }
         String callbackId = update.hasCallbackQuery() ? update.getCallbackQuery().getId() : null;
         try {
-            if (update.hasMessage() && isProcessable(update.getMessage())) {
+            if (update.hasMessage() && hasNewMembers(update.getMessage())) {
+                handleMemberJoin(update.getMessage());
+            } else if (update.hasMessage() && isProcessable(update.getMessage())) {
                 Message message = update.getMessage();
                 long chatId = message.getChatId();
                 long userId = message.getFrom() != null ? message.getFrom().getId() : 0L;

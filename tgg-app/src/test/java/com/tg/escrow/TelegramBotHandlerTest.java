@@ -250,7 +250,9 @@ class TelegramBotHandlerTest {
                         noWarnings));
         return new TelegramBotHandler(BotTokenConfig.from(k -> "123456:TESTTOKEN"), dispatcher,
                 reply, "mybot", webAppUrl,
-                (chatId, userId) -> com.tg.escrow.core.MemberRole.MEMBER);
+                (chatId, userId) -> com.tg.escrow.core.MemberRole.MEMBER,
+                new MemberJoinHandler(new com.tg.escrow.core.ProtectionMode(),
+                        new com.tg.escrow.core.WelcomeTemplate("欢迎 {username}")));
     }
 
     private static Update textUpdate(long chatId, long userId, String text) {
@@ -402,6 +404,50 @@ class TelegramBotHandlerTest {
         message.setFrom(new User(4242L, "tester", false));
         message.setText("hi");
         return message;
+    }
+
+    // ── 入群事件（Wave 2）──────────────────────────────────────────────────
+
+    private static Update memberJoinUpdate(long chatId, long newMemberId, String name) {
+        Message message = new Message();
+        message.setMessageId(9);
+        message.setChat(new Chat(chatId, "supergroup"));
+        message.setFrom(new User(newMemberId, name, false));
+        message.setNewChatMembers(List.of(new User(newMemberId, name, false)));
+        Update update = new Update();
+        update.setMessage(message);
+        return update;
+    }
+
+    @Test
+    @DisplayName("【接线证据】新成员入群 → 经胶水层真的发出欢迎语（此前 new_chat_members 整条被跳过）")
+    void memberJoinSendsWelcome() {
+        RecordingReply reply = new RecordingReply();
+        TelegramBotHandler h = handler(reply, new InMemoryStore());
+
+        h.consume(memberJoinUpdate(100L, 7777L, "小明"));
+
+        assertThat(reply.texts)
+                .as("门禁若不认 new_chat_members，这里会是空——欢迎语永远不会发出")
+                .hasSize(1);
+        assertThat(reply.texts.get(0)).contains("欢迎").contains("小明");
+    }
+
+    @Test
+    @DisplayName("bot 自己入群 → 不自我欢迎")
+    void botJoiningDoesNotWelcomeItself() {
+        RecordingReply reply = new RecordingReply();
+        TelegramBotHandler h = handler(reply, new InMemoryStore());
+        Message message = new Message();
+        message.setMessageId(9);
+        message.setChat(new Chat(100L, "supergroup"));
+        message.setNewChatMembers(List.of(new User(5555L, "otherbot", true)));
+        Update update = new Update();
+        update.setMessage(message);
+
+        h.consume(update);
+
+        assertThat(reply.texts).isEmpty();
     }
 
     @Test
