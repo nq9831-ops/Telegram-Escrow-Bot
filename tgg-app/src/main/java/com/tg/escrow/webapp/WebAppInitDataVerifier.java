@@ -107,12 +107,26 @@ public final class WebAppInitDataVerifier {
     }
 
     /**
-     * 验签并提取可信的用户 ID。
+     * 已验签的身份与启动参数。
+     *
+     * <p>{@code startParam} 即直链 {@code https://t.me/<bot>?startapp=<token>} 携带的
+     * {@code start_param} 字段——它<b>同样在签名覆盖范围内</b>（initData 除 {@code hash}
+     * 外全部字段参与 data-check-string），故可安全作为「这条链接指向哪笔邀请」的凭证。
+     * 普通入口（无 startapp）时为 {@code null}。
+     *
+     * @param userId     已验签的用户 ID
+     * @param startParam 已验签的启动参数（令牌）；无则为 {@code null}
+     */
+    public record VerifiedUser(long userId, String startParam) {
+    }
+
+    /**
+     * 验签并提取可信的身份与启动参数。
      *
      * @param initData 前端 {@code Telegram.WebApp.initData} 的<b>原始串</b>
-     * @return 验签通过时的 userId；任何失败均为 {@link Optional#empty()}
+     * @return 验签通过时的 {@link VerifiedUser}；任何失败均为 {@link Optional#empty()}
      */
-    public Optional<Long> verifyUserId(String initData) {
+    public Optional<VerifiedUser> verify(String initData) {
         if (initData == null || initData.isBlank()) {
             return Optional.empty();
         }
@@ -128,11 +142,33 @@ public final class WebAppInitDataVerifier {
             if (!authDateFresh(fields.get("auth_date"))) {
                 return Optional.empty();
             }
-            return extractUserId(fields.get("user"));
+            Optional<Long> userId = extractUserId(fields.get("user"));
+            if (userId.isEmpty()) {
+                return Optional.empty();
+            }
+            return Optional.of(new VerifiedUser(userId.get(), extractStartParam(fields.get("start_param"))));
         } catch (Exception ex) {
             // fail-closed：解析异常不得变成放行
             return Optional.empty();
         }
+    }
+
+    /**
+     * 验签并提取可信的用户 ID（{@link #verify} 的便捷投影）。
+     *
+     * @param initData 前端 {@code Telegram.WebApp.initData} 的<b>原始串</b>
+     * @return 验签通过时的 userId；任何失败均为 {@link Optional#empty()}
+     */
+    public Optional<Long> verifyUserId(String initData) {
+        return verify(initData).map(VerifiedUser::userId);
+    }
+
+    /** start_param 是 URL-encoded 的普通字段，此处解码；缺失返回 {@code null}。 */
+    private static String extractStartParam(String encoded) {
+        if (encoded == null || encoded.isBlank()) {
+            return null;
+        }
+        return URLDecoder.decode(encoded, StandardCharsets.UTF_8);
     }
 
     /** 解析 query string，<b>保留原始（未解码）值</b>——hash 是对原始串算的。 */

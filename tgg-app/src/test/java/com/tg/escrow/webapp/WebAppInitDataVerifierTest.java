@@ -97,6 +97,20 @@ class WebAppInitDataVerifierTest {
         return String.join("&", fields) + "&hash=" + sign(dcs);
     }
 
+    /** 造一个带 {@code start_param} 的合法 initData（模拟经 {@code ?startapp=<token>} 打开）。 */
+    private static String initDataWithStartParam(long userId, Instant authDate, String startParam) {
+        List<String> fields = new ArrayList<>(List.of(
+                "auth_date=" + authDate.getEpochSecond(),
+                "query_id=AAHdF6IQAAAAAN0XohDhrOrc",
+                "start_param=" + startParam,
+                "user=" + URLEncoder.encode(
+                        "{\"id\":" + userId + ",\"first_name\":\"Tester\",\"username\":\"tester\"}",
+                        StandardCharsets.UTF_8)));
+        fields.sort(String::compareTo);
+        String dcs = String.join("\n", fields);
+        return String.join("&", fields) + "&hash=" + sign(dcs);
+    }
+
     private static WebAppInitDataVerifier verifier(Instant now) {
         return new WebAppInitDataVerifier(BOT_TOKEN, MAX_AGE, Clock.fixed(now, ZoneOffset.UTC));
     }
@@ -123,6 +137,38 @@ class WebAppInitDataVerifierTest {
         String data = initData(8724975623L, T0).replace("8724975623", "9999999999");
 
         assertThat(verifier(T0).verifyUserId(data)).isEmpty();
+    }
+
+    @Test
+    @DisplayName("start_param 随签名下发 → verify 同时取出 userId 与令牌")
+    void startParamExtractedFromSignedData() {
+        String data = initDataWithStartParam(8724975623L, T0, "abc123token");
+
+        var verified = verifier(T0).verify(data);
+
+        assertThat(verified).isPresent();
+        assertThat(verified.get().userId()).isEqualTo(8724975623L);
+        assertThat(verified.get().startParam()).isEqualTo("abc123token");
+    }
+
+    @Test
+    @DisplayName("篡改 start_param（不改 hash）→ 验签失败——身份与令牌同源于签名串")
+    void tamperedStartParamRejected() {
+        String data = initDataWithStartParam(8724975623L, T0, "abc123token")
+                .replace("abc123token", "evil-token-9");
+
+        assertThat(verifier(T0).verify(data))
+                .as("若实现从 initDataUnsafe（未签名）取令牌，此篡改会被放行——正是本用例要证伪的")
+                .isEmpty();
+    }
+
+    @Test
+    @DisplayName("无 start_param 的普通入口 → userId 可取，令牌为 null（而非空串）")
+    void missingStartParamYieldsNull() {
+        var verified = verifier(T0).verify(initData(8724975623L, T0));
+
+        assertThat(verified).isPresent();
+        assertThat(verified.get().startParam()).isNull();
     }
 
     @Test
