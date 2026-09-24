@@ -44,6 +44,11 @@
 | S4 | **真实链上源** | `HttpChainSource implements ChainSource`（对接 TON HTTP API），两个实例做双源交叉（复用 `BalanceCrossVerifier`）。**需确认 TON 的确认数语义**（见待决文档 D 节）。 |
 | S5 | **TON 托管合约** | Tolk 编写 `EscrowContract`：`fund/release/refund/dispute/resolve`。守卫：`impure` 修饰、减法前验余额、commit-reveal 随机数、**校验 jetton 发送者合约地址**（防 Fake Jetton，T39）。多签语义见待决文档 C1。 |
 
+> **Wave 5 技术输入（2026-09-24 补）**：TON Pay 支付层 SDK 与 Tolk 合约选型见 `docs/requirements/03-TON-Pay与Tolk.md`。
+> 要点：① Tolk 已是本项目既定选型（FunC 已 legacy、编译器不再维护），S5 是**从零用 Tolk 写**而非迁移；
+> ② 接 TON Pay 前需先补 **Web/HTTP 端点**（项目当前无 Web 层，webhook 无处落）——建议独立立项；
+> ③ 「每笔交易独立地址」与 TON Pay 的 `recipientAddr` 关系需在 S5 设计时一并确定。
+
 ---
 
 ## 2. 群管理剩余 25 项（tgg-core）

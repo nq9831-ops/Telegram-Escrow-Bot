@@ -192,3 +192,20 @@ Boot 4.x 的 Jackson 3 与 TelegramBots 的 Jackson 2 注解不兼容，症状�
 - 多签拼接（T15/T16 的联邦签名 + 托管钱包签名）需在 S5 合约设计时一并确定。
 
 **不决定的后果**：T7/T8/T9/T10/T11 与 S5 的钱包集成方向未定；安全文档口径可能与实现不符。
+
+---
+
+## G. TON Pay 集成的前置（新增，2026-09-24）
+
+**背景**：你提交了 TON Pay 方案（整理与独立核实见 `docs/requirements/03-TON-Pay与Tolk.md`）。
+TON Pay 是 TON 基金会 2026-02 的支付层 SDK，可用于「买方锁资」这一步。但有两项前置不属技术侧自行决定：
+
+1. **Merchant API Key**（凭据）：无 Key 则拿不到 webhook 通知与 Dashboard，只能手动轮询链上。
+   需你申请。它是**必须安全保管的服务端密钥**（`TONPAY_API_SECRET`），走环境变量注入、禁入库。
+2. **Web/HTTP 端点缺口**：webhook 需要一个对外 HTTP 端点，而项目**当前没有 Web 层**
+   （无 Spring Web 依赖、无 `@RestController`）。这是独立的基础设施项，需先决定是否引入 Web 服务及其安全边界。
+
+**我的建议**：把「引入 Web 层」作为 S5 的前置**显式立项**（而非顺手加）；先申请 API Key；
+在 S5 合约设计里一并确定「每笔交易独立地址」与 TON Pay `recipientAddr` 的关系。
+
+**不决定的后果**：T9/T10/T11 的支付路径无法开工；webhook 验证没有落点。
