@@ -38,6 +38,15 @@
       <artifactId>spring-boot-starter</artifactId>
     </dependency>
 
+    <!-- Telegram Bot 接入（S1）：版本与根 pom 注释锁定的 10.3.0 一致——
+         Boot 4.x 的 Jackson 3 与本库的 Jackson 2 注解不兼容（Update 反序列化静默失败），
+         故根 pom 锁 Boot 3.5.16，勿升 4.x。 -->
+    <dependency>
+      <groupId>org.telegram</groupId>
+      <artifactId>telegrambots-longpolling</artifactId>
+      <version>10.3.0</version>
+    </dependency>
+
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-starter-test</artifactId>
