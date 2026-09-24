@@ -42,7 +42,8 @@
 | S2 | **命令层接线** | `TradeCommandHandler.handle(BotCommand, CommandActor) → String`：`/escrow create <卖方> <金额> <币种>` → `EscrowTradeService.initiate` → 「已创建订单 #N」或「被拒：<原因>，可重试：<时刻>」。纯逻辑可测，是 Telegram 级用户验收的最后一环。 |
 | S3 | **Bot 内 6 项入口** | T1 完整化、T2 状态查询（`TradeStatusView`）、T3 信用分联动、T4 与群管理联动、T5 建群引导、T6 公告。 |
 | S4 | **真实链上源** | `HttpChainSource implements ChainSource`（对接 TON HTTP API），两个实例做双源交叉（复用 `BalanceCrossVerifier`）。**需确认 TON 的确认数语义**（见待决文档 D 节）。 |
-| S5 | **TON 托管合约** | Tolk 编写 `EscrowContract`：`fund/release/refund/dispute/resolve`。守卫：`impure` 修饰、减法前验余额、commit-reveal 随机数、**校验 jetton 发送者合约地址**（防 Fake Jetton，T39）。多签语义见待决文档 C1。 |
+| S5 | **TON 托管合约** | Tolk 编写 `EscrowContract`：`fund/release/refund/dispute/resolve`。守卫：`impure` 修饰、减法前验余额、commit-reveal 随机数、**校验 jetton 发送者合约地址**（防 Fake Jetton，T39）。多签语义见待决文档 C1。**验收须含 Gas 报告**（`blueprint test --gas-report --snapshot`，建立基线并逐版对比）。 |
+| S6 | **Web / Admin 层缺失** | 项目**无任何 Web 层**（无 Spring Web、无 `@RestController`）。多份材料（TON Pay webhook、违禁词在线管理、五进程架构）都指向同一缺口。建议**显式立项**：先划层（Web/后台任务边界）再谈拆进程。详见 `docs/requirements/06-架构与工程实践.md` 与待决 I 节。 |
 
 > **Wave 5 技术输入（2026-09-24 补）**：TON Pay 支付层 SDK 与 Tolk 合约选型见 `docs/requirements/03-TON-Pay与Tolk.md`。
 > 要点：① Tolk 已是本项目既定选型（FunC 已 legacy、编译器不再维护），S5 是**从零用 Tolk 写**而非迁移；
