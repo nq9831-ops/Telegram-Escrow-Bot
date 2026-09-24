@@ -23,6 +23,10 @@
 | — | 命令解析 | `CommandParser` / `BotCommand` |
 | — | 联邦签名 | `FederationKeyPair` / `FederationException` |
 | — | 持久化地基 | `EscrowOrderRepository` / `JpaEscrowOrderStore` / `JpaTradeHistoryPort` / `V1__init_escrow.sql` |
+| G7/G9/G10/G26/G23 | 波次 G-A 内容安全与限流 | `MessageRepeatDetector` / `LinkFilter` / `MediaFilter` / `SlidingWindowCounter` / `RateLimiter`（提交 `8046ed7`，tgg-core 71→107） |
+| T2/T13/T27/T14/T28/T18/T26/T38 | 波次 T-A 交易流程深度 | `TradeStatusView` / `TradeTimeoutPolicy` / `DisputeFlow` / `TradeReview` / `MaintenanceWindow` / `TradeStage`（提交 `b4ec90f`，tgg-escrow 97→128） |
+
+> 波次 **G-A** 与 **T-A** 已完成（灾后重放，`mvn test` 全绿 193→260）。另修复 `MessageRepeatDetector` 内容 key 无界增长、`RateLimiter` 跨层计数波及全群两处缺陷。第 2、3 节中这些条目已落地，续跑请跳过。
 
 ---
 
