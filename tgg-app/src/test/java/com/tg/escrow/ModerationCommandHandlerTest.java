@@ -29,6 +29,9 @@ import com.tg.escrow.core.GroupAdminPort;
 import com.tg.escrow.core.MemberRole;
 import com.tg.escrow.core.MemberRolePort;
 import com.tg.escrow.core.ModerationOrchestrator;
+import com.tg.escrow.core.WarningOrchestrator;
+import com.tg.escrow.core.WarningPolicy;
+import com.tg.escrow.moderation.WarningPort;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -82,10 +85,40 @@ class ModerationCommandHandlerTest {
         }
     }
 
-    /** 目标一律是普通成员（除专门用例）。 */
+    /** 记录型 fake 警告端口：把「警告到底记没记上」变成可断言的物理事实。 */
+    static final class FakeWarningPort implements WarningPort {
+        private final java.util.Map<Long, Integer> counts = new java.util.HashMap<>();
+        final List<String> cleared = new ArrayList<>();
+
+        @Override
+        public int warn(long guildId, long userId) {
+            int next = counts.getOrDefault(userId, 0) + 1;
+            counts.put(userId, next);
+            return next;
+        }
+
+        @Override
+        public int countOf(long guildId, long userId) {
+            return counts.getOrDefault(userId, 0);
+        }
+
+        @Override
+        public void clear(long guildId, long userId) {
+            counts.remove(userId);
+            cleared.add("clear:" + userId);
+        }
+    }
+
+    /** 目标一律是普通成员（除专门用例）。警告策略：满 1 次即禁言。 */
     private static ModerationCommandHandler handler(RecordingPort port) {
+        return handler(port, new FakeWarningPort());
+    }
+
+    private static ModerationCommandHandler handler(RecordingPort port, FakeWarningPort warnings) {
         MemberRolePort roles = (chatId, userId) -> MemberRole.MEMBER;
-        return new ModerationCommandHandler(new ModerationOrchestrator(port), roles);
+        return new ModerationCommandHandler(new ModerationOrchestrator(port), roles, warnings,
+                new WarningOrchestrator(new WarningPolicy(1, 5),
+                        new ModerationOrchestrator(port), Duration.ofMinutes(10)));
     }
 
     private static BotCommand cmd(String name, String... args) {
@@ -180,7 +213,10 @@ class ModerationCommandHandlerTest {
         RecordingPort port = new RecordingPort();
         // 目标也是管理员（与执行者同级）
         MemberRolePort roles = (chatId, userId) -> MemberRole.ADMIN;
-        ModerationCommandHandler h = new ModerationCommandHandler(new ModerationOrchestrator(port), roles);
+        ModerationCommandHandler h = new ModerationCommandHandler(new ModerationOrchestrator(port), roles,
+                new FakeWarningPort(),
+                new WarningOrchestrator(new WarningPolicy(3, 5), new ModerationOrchestrator(port),
+                        Duration.ofMinutes(10)));
 
         String out = h.handle(cmd("kick", String.valueOf(TARGET)), ADMIN_ACTOR, CHAT);
 
@@ -188,14 +224,121 @@ class ModerationCommandHandlerTest {
         assertThat(port.calls).isEmpty();
     }
 
+    // ── 警告累计（Wave 2）──────────────────────────────────────────────────
+
+    @Test
+    @DisplayName("canHandle 认 warn / unwarn")
+    void canHandleWarnCommands() {
+        ModerationCommandHandler h = handler(new RecordingPort());
+
+        assertThat(h.canHandle(cmd("warn", String.valueOf(TARGET)))).isTrue();
+        assertThat(h.canHandle(cmd("unwarn", String.valueOf(TARGET)))).isTrue();
+    }
+
+    @Test
+    @DisplayName("【反证】普通成员 /warn → 拒，且【警告端口零记录】（拒绝必须发生在记录之前）")
+    void memberCannotWarnAndNothingRecorded() {
+        RecordingPort port = new RecordingPort();
+        FakeWarningPort warnings = new FakeWarningPort();
+
+        String out = handler(port, warnings).handle(cmd("warn", String.valueOf(TARGET)), MEMBER_ACTOR, CHAT);
+
+        assertThat(out).contains("无权");
+        assertThat(warnings.countOf(CHAT, TARGET))
+                .as("若先记录再鉴权，普通成员就能把别人的警告数刷到判罚线——所以断言零记录")
+                .isZero();
+    }
+
+    @Test
+    @DisplayName("管理员 /warn → 累计 +1 并回报次数")
+    void adminWarnIncrements() {
+        FakeWarningPort warnings = new FakeWarningPort();
+        ModerationCommandHandler h = handler(new RecordingPort(), warnings);
+
+        String out = h.handle(cmd("warn", String.valueOf(TARGET)), ADMIN_ACTOR, CHAT);
+
+        assertThat(out).contains("累计 1 次");
+        assertThat(warnings.countOf(CHAT, TARGET)).isEqualTo(1);
+    }
+
+    @Test
+    @DisplayName("达阈值 → 真的执行判罚（禁言端口被调用）")
+    void warnTriggersPenalty() {
+        RecordingPort port = new RecordingPort();
+
+        String out = handler(port).handle(cmd("warn", String.valueOf(TARGET)), ADMIN_ACTOR, CHAT);
+
+        assertThat(port.calls).containsExactly("mute:" + CHAT + ":" + TARGET + ":PT10M");
+        assertThat(out).contains("累计 1 次");
+    }
+
+    @Test
+    @DisplayName("判罚失败（目标同级）→ 回执【两件都说】：警告已记、处罚未执行")
+    void warnReportsBothWhenPenaltyRejected() {
+        RecordingPort port = new RecordingPort();
+        FakeWarningPort warnings = new FakeWarningPort();
+        MemberRolePort roles = (chatId, userId) -> MemberRole.ADMIN;   // 目标与执行者同级
+        ModerationCommandHandler h = new ModerationCommandHandler(
+                new ModerationOrchestrator(port), roles, warnings,
+                new WarningOrchestrator(new WarningPolicy(1, 5),
+                        new ModerationOrchestrator(port), Duration.ofMinutes(10)));
+
+        String out = h.handle(cmd("warn", String.valueOf(TARGET)), ADMIN_ACTOR, CHAT);
+
+        assertThat(out).contains("累计 1 次");
+        assertThat(out)
+                .as("不能只报成功——管理员会以为人已被禁言")
+                .contains("未执行");
+        assertThat(port.calls).isEmpty();
+    }
+
+    @Test
+    @DisplayName("/unwarn：管理员可清除；普通成员被拒且零调用")
+    void unwarnGuards() {
+        FakeWarningPort warnings = new FakeWarningPort();
+        warnings.warn(CHAT, TARGET);
+        ModerationCommandHandler h = handler(new RecordingPort(), warnings);
+
+        assertThat(h.handle(cmd("unwarn", String.valueOf(TARGET)), MEMBER_ACTOR, CHAT)).contains("无权");
+        assertThat(warnings.cleared).isEmpty();
+
+        assertThat(h.handle(cmd("unwarn", String.valueOf(TARGET)), ADMIN_ACTOR, CHAT)).contains("清除");
+        assertThat(warnings.countOf(CHAT, TARGET)).isZero();
+    }
+
+    @Test
+    @DisplayName("/warn 参数缺失或非法 → 用法说明，且零记录")
+    void warnBadArgs() {
+        FakeWarningPort warnings = new FakeWarningPort();
+        ModerationCommandHandler h = handler(new RecordingPort(), warnings);
+
+        assertThat(h.handle(cmd("warn"), ADMIN_ACTOR, CHAT)).contains("用法");
+        assertThat(h.handle(cmd("warn", "abc"), ADMIN_ACTOR, CHAT)).contains("用法");
+        assertThat(h.handle(cmd("unwarn"), ADMIN_ACTOR, CHAT)).contains("用法");
+
+        assertThat(warnings.countOf(CHAT, TARGET)).isZero();
+    }
+
     @Test
     @DisplayName("构造：依赖缺失 → 抛")
     void missingDepsFailFast() {
+        WarningOrchestrator warn = new WarningOrchestrator(new WarningPolicy(3, 5),
+                new ModerationOrchestrator(new RecordingPort()), Duration.ofMinutes(10));
         assertThat(org.assertj.core.api.Assertions.catchThrowable(
-                () -> new ModerationCommandHandler(null, (c, u) -> MemberRole.MEMBER)))
+                () -> new ModerationCommandHandler(null, (c, u) -> MemberRole.MEMBER,
+                        new FakeWarningPort(), warn)))
                 .isInstanceOf(com.tg.escrow.common.TggException.class);
         assertThat(org.assertj.core.api.Assertions.catchThrowable(
-                () -> new ModerationCommandHandler(new ModerationOrchestrator(new RecordingPort()), null)))
+                () -> new ModerationCommandHandler(new ModerationOrchestrator(new RecordingPort()), null,
+                        new FakeWarningPort(), warn)))
+                .isInstanceOf(com.tg.escrow.common.TggException.class);
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(
+                () -> new ModerationCommandHandler(new ModerationOrchestrator(new RecordingPort()),
+                        (c, u) -> MemberRole.MEMBER, null, warn)))
+                .isInstanceOf(com.tg.escrow.common.TggException.class);
+        assertThat(org.assertj.core.api.Assertions.catchThrowable(
+                () -> new ModerationCommandHandler(new ModerationOrchestrator(new RecordingPort()),
+                        (c, u) -> MemberRole.MEMBER, new FakeWarningPort(), null)))
                 .isInstanceOf(com.tg.escrow.common.TggException.class);
     }
 }

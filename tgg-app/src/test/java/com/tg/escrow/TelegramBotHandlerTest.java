@@ -180,25 +180,45 @@ class TelegramBotHandlerTest {
                 new InviteLink("mybot"),
                 noopReviewService(clock),
                 maintenanceService(clock));
+        ModerationOrchestrator orch = new ModerationOrchestrator(new com.tg.escrow.core.GroupAdminPort() {
+            @Override
+            public void kick(long guildId, long userId) {
+            }
+
+            @Override
+            public void ban(long guildId, long userId) {
+            }
+
+            @Override
+            public void mute(long guildId, long userId, java.time.Duration duration) {
+            }
+
+            @Override
+            public void deleteMessage(long guildId, long messageId) {
+            }
+        });
+        com.tg.escrow.moderation.WarningPort noWarnings = new com.tg.escrow.moderation.WarningPort() {
+            @Override
+            public int warn(long guildId, long userId) {
+                return 1;
+            }
+
+            @Override
+            public int countOf(long guildId, long userId) {
+                return 0;
+            }
+
+            @Override
+            public void clear(long guildId, long userId) {
+            }
+        };
         BotDispatcher dispatcher = new BotDispatcher(trade, "mybot",
                 new BannedWordRegistry(), new KeywordAutoReply(),
-                new ModerationCommandHandler(new ModerationOrchestrator(new com.tg.escrow.core.GroupAdminPort() {
-                    @Override
-                    public void kick(long guildId, long userId) {
-                    }
-
-                    @Override
-                    public void ban(long guildId, long userId) {
-                    }
-
-                    @Override
-                    public void mute(long guildId, long userId, java.time.Duration duration) {
-                    }
-
-                    @Override
-                    public void deleteMessage(long guildId, long messageId) {
-                    }
-                }), (chatId, userId) -> com.tg.escrow.core.MemberRole.MEMBER));
+                new ModerationCommandHandler(orch,
+                        (chatId, userId) -> com.tg.escrow.core.MemberRole.MEMBER, noWarnings,
+                        new com.tg.escrow.core.WarningOrchestrator(
+                                new com.tg.escrow.core.WarningPolicy(3, 5), orch,
+                                java.time.Duration.ofMinutes(10))));
         return new TelegramBotHandler(BotTokenConfig.from(k -> "123456:TESTTOKEN"), dispatcher,
                 reply, "mybot", webAppUrl,
                 (chatId, userId) -> com.tg.escrow.core.MemberRole.MEMBER);

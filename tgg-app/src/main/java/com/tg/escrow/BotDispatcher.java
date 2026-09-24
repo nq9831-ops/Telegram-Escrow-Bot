@@ -51,7 +51,8 @@ public final class BotDispatcher {
             + "（对方点开即接单）；/escrow create <卖方ID> <金额> <币种> 预览风险，"
             + "确认后 /escrow confirm 创建交易；/escrow lock|deliver|release|refund|dispute <订单号> "
             + "推进交易；/escrow status <订单号> 查询状态。"
-            + "群管理（管理员）：/kick <用户ID>、/ban <用户ID>、/mute <用户ID> <分钟>、/del <消息ID>。";
+            + "群管理（管理员）：/kick <用户ID>、/ban <用户ID>、/mute <用户ID> <分钟>、/del <消息ID>、"
+            + "/warn <用户ID>、/unwarn <用户ID>。";
 
     private final TradeCommandHandler tradeHandler;
     private final String botUsername;

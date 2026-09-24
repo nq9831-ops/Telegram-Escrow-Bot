@@ -133,7 +133,7 @@ class BotDispatcherTest {
 
     /** 本类不测群管理路径——给个空实现让装配成形（命令由 ModerationCommandHandlerTest 覆盖）。 */
     private static ModerationCommandHandler noopModeration() {
-        return new ModerationCommandHandler(new ModerationOrchestrator(new GroupAdminPort() {
+        ModerationOrchestrator orch = new ModerationOrchestrator(new GroupAdminPort() {
             @Override
             public void kick(long guildId, long userId) {
             }
@@ -149,7 +149,25 @@ class BotDispatcherTest {
             @Override
             public void deleteMessage(long guildId, long messageId) {
             }
-        }), (chatId, userId) -> MemberRole.MEMBER);
+        });
+        com.tg.escrow.moderation.WarningPort noWarnings = new com.tg.escrow.moderation.WarningPort() {
+            @Override
+            public int warn(long guildId, long userId) {
+                return 1;
+            }
+
+            @Override
+            public int countOf(long guildId, long userId) {
+                return 0;
+            }
+
+            @Override
+            public void clear(long guildId, long userId) {
+            }
+        };
+        return new ModerationCommandHandler(orch, (chatId, userId) -> MemberRole.MEMBER, noWarnings,
+                new com.tg.escrow.core.WarningOrchestrator(
+                        new com.tg.escrow.core.WarningPolicy(3, 5), orch, java.time.Duration.ofMinutes(10)));
     }
 
     private static BotDispatcher dispatcher(BannedWordRegistry registry) {

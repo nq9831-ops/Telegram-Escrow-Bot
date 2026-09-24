@@ -28,6 +28,9 @@ import com.tg.escrow.core.GroupAdminPort;
 import com.tg.escrow.core.KeywordAutoReply;
 import com.tg.escrow.core.MemberRolePort;
 import com.tg.escrow.core.ModerationOrchestrator;
+import com.tg.escrow.core.WarningOrchestrator;
+import com.tg.escrow.core.WarningPolicy;
+import com.tg.escrow.moderation.WarningPort;
 import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowOrder;
 import com.tg.escrow.escrow.EscrowOrderLookupPort;
@@ -268,11 +271,32 @@ public class BotWiring {
         return new ModerationOrchestrator(port);
     }
 
-    /** 群管理命令处理器（/kick /ban /mute /del）。 */
+    /** 组管理命令处理器（/kick /ban /mute /del /warn /unwarn）。 */
     @Bean
     public ModerationCommandHandler moderationCommandHandler(ModerationOrchestrator moderation,
-                                                            MemberRolePort roles) {
-        return new ModerationCommandHandler(moderation, roles);
+                                                            MemberRolePort roles,
+                                                            WarningPort warnings,
+                                                            WarningOrchestrator warningOrchestrator) {
+        return new ModerationCommandHandler(moderation, roles, warnings, warningOrchestrator);
+    }
+
+    /** 警告判罚阈值（配置驱动：满 N 次禁言 / 满 M 次踢出）。 */
+    @Bean
+    public WarningPolicy warningPolicy(@Value("${tgg.warning.mute-threshold:3}") int muteThreshold,
+                                       @Value("${tgg.warning.kick-threshold:5}") int kickThreshold) {
+        return new WarningPolicy(muteThreshold, kickThreshold);
+    }
+
+    /**
+     * 警告处置编排（Wave 2：接线 GM-03）。
+     *
+     * <p>默认禁言时长走配置 {@code tgg.warning.default-mute}。
+     */
+    @Bean
+    public WarningOrchestrator warningOrchestrator(WarningPolicy policy,
+                                                   ModerationOrchestrator moderation,
+                                                   @Value("${tgg.warning.default-mute:PT10M}") Duration defaultMute) {
+        return new WarningOrchestrator(policy, moderation, defaultMute);
     }
 
     @Bean
