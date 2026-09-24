@@ -38,6 +38,8 @@ import com.tg.escrow.escrow.TradeHistoryPort;
 import com.tg.escrow.escrow.TradeInvite;
 import com.tg.escrow.escrow.TradeInviteService;
 import com.tg.escrow.escrow.TradeInviteStore;
+import com.tg.escrow.escrow.TradeReviewService;
+import com.tg.escrow.escrow.TradeReviewStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.telegram.telegrambots.meta.api.objects.CallbackQuery;
@@ -128,6 +130,20 @@ class TelegramBotHandlerTest {
         }
     }
 
+    /** 本类不测评价路径——给个空实现让装配成形即可。 */
+    private static TradeReviewService noopReviewService(Clock clock) {
+        return new TradeReviewService(new TradeReviewStore() {
+            @Override
+            public void record(long orderId, long reviewerId, int score, java.time.Instant createdAt) {
+            }
+
+            @Override
+            public java.util.Set<Long> reviewersOf(long orderId) {
+                return java.util.Set.of();
+            }
+        }, clock);
+    }
+
     private static final String WEBAPP_URL = "https://example.test/miniapp/index.html";
 
     private static TelegramBotHandler handler(RecordingReply reply, InMemoryStore store) {
@@ -145,7 +161,8 @@ class TelegramBotHandlerTest {
                 store,
                 new TradeInviteService(gate, history, new NoopInviteStore(), store,
                         Duration.ofHours(24), () -> "tok0", clock),
-                new InviteLink("mybot"));
+                new InviteLink("mybot"),
+                noopReviewService(clock));
         BotDispatcher dispatcher = new BotDispatcher(trade, "mybot",
                 new BannedWordRegistry(), new KeywordAutoReply());
         return new TelegramBotHandler(BotTokenConfig.from(k -> "123456:TESTTOKEN"), dispatcher,

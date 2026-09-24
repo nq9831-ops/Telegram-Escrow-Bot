@@ -32,4 +32,9 @@ public class EscrowPersistenceTestConfig {
     public TradeInviteStore tradeInviteStore(TradeInviteRepository repository) {
         return new JpaTradeInviteStore(repository);
     }
+
+    @Bean
+    public TradeReviewStore tradeReviewStore(TradeReviewRepository repository) {
+        return new JpaTradeReviewStore(repository);
+    }
 }

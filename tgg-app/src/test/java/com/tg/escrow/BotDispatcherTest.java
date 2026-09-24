@@ -39,6 +39,8 @@ import com.tg.escrow.escrow.TradeHistoryPort;
 import com.tg.escrow.escrow.TradeInvite;
 import com.tg.escrow.escrow.TradeInviteService;
 import com.tg.escrow.escrow.TradeInviteStore;
+import com.tg.escrow.escrow.TradeReviewService;
+import com.tg.escrow.escrow.TradeReviewStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -97,7 +99,17 @@ class BotDispatcherTest {
                 orderId -> java.util.Optional.empty(),   // 本类不测 T2 查询，stub 即可
                 new TradeInviteService(gate, history, new NoopInviteStore(), new InMemoryStore(),
                         Duration.ofHours(24), () -> "tok0", clock),
-                new InviteLink("mybot"));
+                new InviteLink("mybot"),
+                new TradeReviewService(new TradeReviewStore() {
+                    @Override
+                    public void record(long orderId, long reviewerId, int score, java.time.Instant at) {
+                    }
+
+                    @Override
+                    public java.util.Set<Long> reviewersOf(long orderId) {
+                        return java.util.Set.of();
+                    }
+                }, clock));
     }
 
     private static BotDispatcher dispatcher(BannedWordRegistry registry) {

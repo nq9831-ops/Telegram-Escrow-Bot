@@ -34,6 +34,7 @@ import com.tg.escrow.escrow.JpaEscrowOrderLookup;
 import com.tg.escrow.escrow.JpaEscrowOrderStore;
 import com.tg.escrow.escrow.JpaTradeHistoryPort;
 import com.tg.escrow.escrow.JpaTradeInviteStore;
+import com.tg.escrow.escrow.JpaTradeReviewStore;
 import com.tg.escrow.escrow.PendingTradeRegistry;
 import com.tg.escrow.escrow.TradeAdmissionGate;
 import com.tg.escrow.escrow.TradeAdmissionPolicy;
@@ -41,6 +42,9 @@ import com.tg.escrow.escrow.TradeHistoryPort;
 import com.tg.escrow.escrow.TradeInviteRepository;
 import com.tg.escrow.escrow.TradeInviteService;
 import com.tg.escrow.escrow.TradeInviteStore;
+import com.tg.escrow.escrow.TradeReviewRepository;
+import com.tg.escrow.escrow.TradeReviewService;
+import com.tg.escrow.escrow.TradeReviewStore;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -148,14 +152,28 @@ public class BotWiring {
         return new InviteLink(botUsername);
     }
 
+    /** 交易评价存储端口（Wave 3：把「谁评过」从进程内存搬进库）。 */
+    @Bean
+    public TradeReviewStore tradeReviewStore(TradeReviewRepository repository) {
+        return new JpaTradeReviewStore(repository);
+    }
+
+    /** 交易评价服务（守卫复用 TradeReview；从库重建「已评价方」，重启后仍拒重复评价）。 */
+    @Bean
+    public TradeReviewService tradeReviewService(TradeReviewStore store, Clock clock) {
+        return new TradeReviewService(store, clock);
+    }
+
     @Bean
     public TradeCommandHandler tradeCommandHandler(EscrowTradeService service,
                                                    AmountTierPolicy tierPolicy,
                                                    PendingTradeRegistry pending,
                                                    EscrowOrderLookupPort lookup,
                                                    TradeInviteService inviteService,
-                                                   InviteLink inviteLink) {
-        return new TradeCommandHandler(service, tierPolicy, pending, lookup, inviteService, inviteLink);
+                                                   InviteLink inviteLink,
+                                                   TradeReviewService reviewService) {
+        return new TradeCommandHandler(service, tierPolicy, pending, lookup, inviteService, inviteLink,
+                reviewService);
     }
 
     /** GM-17 自动回复（空规则表；上线后由管理端注册关键词）。 */

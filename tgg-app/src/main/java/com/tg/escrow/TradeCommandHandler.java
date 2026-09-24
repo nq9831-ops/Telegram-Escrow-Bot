@@ -40,6 +40,7 @@ import com.tg.escrow.escrow.TradeInitiationResult;
 import com.tg.escrow.escrow.TradeInvite;
 import com.tg.escrow.escrow.TradeInviteCreationResult;
 import com.tg.escrow.escrow.TradeInviteService;
+import com.tg.escrow.escrow.TradeReviewService;
 import com.tg.escrow.escrow.TradeStatusView;
 
 import java.math.BigDecimal;
@@ -75,6 +76,7 @@ public final class TradeCommandHandler {
     private static final String SUB_RELEASE = "release";
     private static final String SUB_REFUND = "refund";
     private static final String SUB_DISPUTE = "dispute";
+    private static final String SUB_REVIEW = "review";
 
     /**
      * 资金类状态迁移的诚实标注（Wave 2）：链上托管尚未接入，平台当前只做流程状态登记。
@@ -96,6 +98,7 @@ public final class TradeCommandHandler {
             + "/escrow release <订单号> 买方验收放款；"
             + "/escrow refund <订单号> [理由] 退款；"
             + "/escrow dispute <订单号> <理由> 发起争议；"
+            + "/escrow review <订单号> <评分1-5> 评价（仅终态交易、双方各一次）；"
             + "/escrow status <订单号> 查询订单状态；"
             + "/escrow cancel <订单号> 取消订单（仅当事人，且资金未锁仓时）";
 
@@ -105,15 +108,20 @@ public final class TradeCommandHandler {
     private final EscrowOrderLookupPort lookup;
     private final TradeInviteService inviteService;
     private final InviteLink inviteLink;
+    private final TradeReviewService reviewService;
 
     public TradeCommandHandler(EscrowTradeService service, AmountTierPolicy tierPolicy,
                                PendingTradeRegistry pending, EscrowOrderLookupPort lookup,
-                               TradeInviteService inviteService, InviteLink inviteLink) {
+                               TradeInviteService inviteService, InviteLink inviteLink,
+                               TradeReviewService reviewService) {
         if (service == null || tierPolicy == null || pending == null || lookup == null) {
             throw new TggException("命令处理：交易服务、金额分层策略、待确认登记与订单查询端口均不可为空");
         }
         if (inviteService == null || inviteLink == null) {
             throw new TggException("命令处理：邀请服务与邀请链接构造器均不可为空");
+        }
+        if (reviewService == null) {
+            throw new TggException("命令处理：评价服务不可为空");
         }
         this.service = service;
         this.tierPolicy = tierPolicy;
@@ -121,6 +129,7 @@ public final class TradeCommandHandler {
         this.lookup = lookup;
         this.inviteService = inviteService;
         this.inviteLink = inviteLink;
+        this.reviewService = reviewService;
     }
 
     /** 本处理器是否管辖该命令。 */
@@ -176,6 +185,10 @@ public final class TradeCommandHandler {
                 return USAGE;
             }
             return advance(cmd, actor, order -> service.dispute(order, actor.userId(), reason), "争议", false);
+        }
+
+        if (SUB_REVIEW.equals(sub)) {
+            return handleReview(cmd, actor);
         }
 
         if (!SUB_CREATE.equals(sub) && !SUB_CONFIRM.equals(sub)) {
@@ -265,6 +278,27 @@ public final class TradeCommandHandler {
     }
 
     /**
+     * 交易评价：命令层只负责解析参数与转述，守卫全在 {@link TradeReviewService} / {@code TradeReview}。
+     */
+    private String handleReview(BotCommand cmd, CommandActor actor) {
+        Long orderId = parseLong(cmd.argOpt(1).orElse(null));
+        Integer score = parseInt(cmd.argOpt(2).orElse(null));
+        if (orderId == null || score == null) {
+            return USAGE;
+        }
+        EscrowOrder order = lookup.byId(orderId).orElse(null);
+        if (order == null) {
+            return "订单 #" + orderId + " 不存在（请核对订单号）";
+        }
+        try {
+            reviewService.review(order, actor.userId(), score);
+        } catch (EscrowException ex) {
+            return "无法评价：" + ex.getMessage();
+        }
+        return "已记录你对订单 #" + orderId + " 的评价（" + score + " 分）。";
+    }
+
+    /**
      * 推进类命令的公共骨架（lock / deliver / release / refund / dispute）：
      * 解析订单号 → 查单 → 交给服务层（权限与状态守卫都在那里）→ 统一回执。
      *
@@ -347,7 +381,8 @@ public final class TradeCommandHandler {
                     + "/escrow dispute " + orderId + " <理由>（发起争议）";
             case DISPUTED -> "\n可用操作：/escrow release " + orderId + "（协商放款）、"
                     + "/escrow refund " + orderId + " <理由>（协商退款）";
-            case RELEASED, REFUNDED, CANCELLED -> "";
+            case RELEASED, REFUNDED -> "\n可用操作：/escrow review " + orderId + " <评分1-5>（评价本单）";
+            case CANCELLED -> "";
         };
     }
 
@@ -412,6 +447,17 @@ public final class TradeCommandHandler {
         }
         try {
             return new BigDecimal(s.trim());
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
+    private static Integer parseInt(String s) {
+        if (s == null) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(s.trim());
         } catch (NumberFormatException ex) {
             return null;
         }

@@ -41,6 +41,8 @@ import com.tg.escrow.escrow.TradeHistoryPort;
 import com.tg.escrow.escrow.TradeInvite;
 import com.tg.escrow.escrow.TradeInviteService;
 import com.tg.escrow.escrow.TradeInviteStore;
+import com.tg.escrow.escrow.TradeReviewService;
+import com.tg.escrow.escrow.TradeReviewStore;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -123,6 +125,24 @@ class TradeCommandHandlerTest {
         }
     }
 
+    /** 内存评价存储（重复评价抛异常，模拟库层唯一索引）。 */
+    private static final class InMemoryReviewStore implements TradeReviewStore {
+        private final java.util.Map<Long, java.util.Set<Long>> byOrder = new java.util.HashMap<>();
+
+        @Override
+        public void record(long orderId, long reviewerId, int score, java.time.Instant createdAt) {
+            java.util.Set<Long> reviewers = byOrder.computeIfAbsent(orderId, k -> new java.util.HashSet<>());
+            if (!reviewers.add(reviewerId)) {
+                throw new TggException("交易评价：该方已评价过本单，不可重复评价");
+            }
+        }
+
+        @Override
+        public java.util.Set<Long> reviewersOf(long orderId) {
+            return java.util.Set.copyOf(byOrder.getOrDefault(orderId, java.util.Set.of()));
+        }
+    }
+
     private static BotCommand createCmd(String seller, String amount, String currency) {
         return new BotCommand("escrow", List.of("create", seller, amount, currency));
     }
@@ -156,7 +176,8 @@ class TradeCommandHandlerTest {
                 new PendingTradeRegistry(PENDING_TTL, clock),
                 store,
                 inviteService(gate, history, store, clock),
-                new InviteLink(BOT_USERNAME)), store);
+                new InviteLink(BOT_USERNAME),
+                new TradeReviewService(new InMemoryReviewStore(), clock)), store);
     }
 
     /** 用真实 gate + 真实 service + 真实 registry 装配 handler。ctx 决定门禁看到的事实。 */
@@ -174,7 +195,8 @@ class TradeCommandHandlerTest {
                 new PendingTradeRegistry(PENDING_TTL, clock),
                 store,
                 inviteService(gate, history, store, clock),
-                new InviteLink(BOT_USERNAME));
+                new InviteLink(BOT_USERNAME),
+                new TradeReviewService(new InMemoryReviewStore(), clock));
     }
 
     /** 邀请服务：复用同一门禁/历史/存储/时钟，令牌固定便于断言。 */
@@ -595,5 +617,49 @@ class TradeCommandHandlerTest {
         String out = h.handle(statusCmd("1"), ACTOR);
 
         assertThat(out).contains("/escrow deliver 1");
+    }
+
+    // ── 评价命令（Wave 3 接线）──────────────────────────────────────────────
+
+    private static BotCommand reviewCmd(String orderId, String score) {
+        return new BotCommand("escrow", List.of("review", orderId, score));
+    }
+
+    @Test
+    @DisplayName("review：终态交易可评价；同一方重复评价 → 拒")
+    void reviewRecordsOnce() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+        h.handle(lockCmd("1"), ACTOR);
+        h.handle(deliverCmd("1"), SELLER_ACTOR);
+        h.handle(releaseCmd("1"), ACTOR);           // 终态 RELEASED
+
+        assertThat(h.handle(reviewCmd("1", "5"), ACTOR)).contains("评价");
+        assertThat(h.handle(reviewCmd("1", "1"), ACTOR))
+                .as("同一方不得重复评价（守卫 + 唯一索引两道防线）")
+                .contains("无法评价");
+    }
+
+    @Test
+    @DisplayName("review：未到终态 → 拒；参数缺失/非法 → 用法说明")
+    void reviewGuardsAndArgs() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+
+        assertThat(h.handle(reviewCmd("1", "5"), ACTOR)).contains("无法评价");
+        assertThat(h.handle(new BotCommand("escrow", List.of("review", "1")), ACTOR)).contains("用法");
+        assertThat(h.handle(reviewCmd("abc", "5"), ACTOR)).contains("用法");
+        assertThat(h.handle(reviewCmd("1", "x"), ACTOR)).contains("用法");
+    }
+
+    @Test
+    @DisplayName("终态订单的状态回执提示可评价（命令真实存在，不指挥用户发空命令）")
+    void statusSuggestsReviewOnTerminal() {
+        TradeCommandHandler h = handler(5, Duration.ZERO, clean());
+        placeOpenOrder(h);
+        h.handle(lockCmd("1"), ACTOR);
+        h.handle(releaseCmd("1"), ACTOR);
+
+        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("/escrow review 1");
     }
 }

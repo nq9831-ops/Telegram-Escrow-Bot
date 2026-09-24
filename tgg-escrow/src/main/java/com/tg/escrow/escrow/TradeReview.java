@@ -25,6 +25,7 @@ package com.tg.escrow.escrow;
 
 import com.tg.escrow.common.EscrowException;
 
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Set;
@@ -57,12 +58,27 @@ public final class TradeReview {
     private final Set<Long> reviewed = new HashSet<>();
 
     public TradeReview(EscrowOrder order) {
+        this(order, Set.of());
+    }
+
+    /**
+     * 带「既有评价方」的构造器——供从持久化重建（Wave 3 接线）。
+     *
+     * <p>守卫语义与内存版完全一致，差别只在初始的「已评价」集合来源。有了它，
+     * 「谁评过」可以来自数据库而非仅本次进程的内存——进程重启后仍能拒绝重复评价。
+     *
+     * @param alreadyReviewed 已评价过的当事人 ID（{@code null} 视为空）
+     */
+    public TradeReview(EscrowOrder order, Collection<Long> alreadyReviewed) {
         if (order == null) {
             throw new EscrowException("交易评价：订单不可为空");
         }
         this.state = order.currentState();
         this.buyerId = order.getBuyerUserId();
         this.sellerId = order.getSellerUserId();
+        if (alreadyReviewed != null) {
+            this.reviewed.addAll(alreadyReviewed);
+        }
     }
 
     /**
