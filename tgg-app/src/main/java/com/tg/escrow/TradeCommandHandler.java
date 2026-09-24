@@ -66,7 +66,10 @@ public final class TradeCommandHandler {
     private static final String SUB_CONFIRM = "confirm";
     private static final String SUB_STATUS = "status";
     private static final String SUB_CANCEL = "cancel";
-    private static final String USAGE = "用法：/escrow create <卖方ID> <金额> <币种> 预览风险；"
+    /**
+     * 用法说明文案（公开，供分发器判定"这条回执是用法说明"——从而在胶水层附上打开表单的按钮）。
+     */
+    public static final String USAGE = "用法：/escrow create <卖方ID> <金额> <币种> 预览风险；"
             + "确认后发 /escrow confirm <卖方ID> <金额> <币种> 创建交易；"
             + "/escrow status <订单号> 查询订单状态；"
             + "/escrow cancel <订单号> 取消订单（仅当事人，且资金未锁仓时）";

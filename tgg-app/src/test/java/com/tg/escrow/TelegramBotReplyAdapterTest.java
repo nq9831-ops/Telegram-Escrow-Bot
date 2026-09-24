@@ -29,6 +29,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
@@ -73,6 +75,41 @@ class TelegramBotReplyAdapterTest {
                 ArgumentCaptor.forClass(AnswerCallbackQuery.class);
         verify(client).execute(captor.capture());
         assertThat(captor.getValue().getCallbackQueryId()).isEqualTo("cb-42");
+    }
+
+    @Test
+    @DisplayName("sendTextWithWebApp → execute(SendMessage)：replyMarkup 为含 web_app 按钮的 inline 键盘")
+    void sendTextWithWebAppBuildsInlineButton() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        adapter.sendTextWithWebApp(123456L, "用法说明…", "📝 打开表单",
+                "https://example.test/miniapp/index.html");
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(client).execute(captor.capture());
+        SendMessage sent = captor.getValue();
+        assertThat(sent.getChatId()).isEqualTo("123456");
+        assertThat(sent.getText()).isEqualTo("用法说明…");
+        assertThat(sent.getReplyMarkup()).isInstanceOf(InlineKeyboardMarkup.class);
+
+        InlineKeyboardMarkup markup = (InlineKeyboardMarkup) sent.getReplyMarkup();
+        InlineKeyboardButton button = markup.getKeyboard().get(0).get(0);
+        assertThat(button.getText()).isEqualTo("📝 打开表单");
+        assertThat(button.getWebApp()).isNotNull();
+        assertThat(button.getWebApp().getUrl())
+                .isEqualTo("https://example.test/miniapp/index.html");
+    }
+
+    @Test
+    @DisplayName("sendTextWithWebApp：url 为空/空白 → 直接抛（不发出缺按钮的半成品）")
+    void webAppSendRequiresUrl() {
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(mock(TelegramClient.class));
+
+        assertThatThrownBy(() -> adapter.sendTextWithWebApp(1L, "x", "btn", ""))
+                .isInstanceOf(TggException.class);
+        assertThatThrownBy(() -> adapter.sendTextWithWebApp(1L, "x", "btn", null))
+                .isInstanceOf(TggException.class);
     }
 
     @Test

@@ -35,6 +35,17 @@ public interface BotReplyPort {
     void sendText(long chatId, String text);
 
     /**
+     * 发送带「打开表单」按钮的文本回执（S6 / Wave 3）。
+     *
+     * <p>按钮为 Telegram inline {@code web_app}——点击在客户端内打开 Mini App 页面。
+     * {@code url} 必须是 <b>HTTPS</b>（Telegram 硬性要求，且需与 bot 关联的域名一致）。
+     *
+     * @param buttonText 按钮文字
+     * @param url        表单页地址（HTTPS）
+     */
+    void sendTextWithWebApp(long chatId, String text, String buttonText, String url);
+
+    /**
      * 应答 callback query（<b>必须调用</b>）。
      *
      * <p>不调用会让客户端按钮一直转圈直到超时——这是正确性问题而非体验优化，

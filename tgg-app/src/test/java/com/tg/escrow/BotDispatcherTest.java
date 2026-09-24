@@ -99,9 +99,10 @@ class BotDispatcherTest {
         KeywordAutoReply autoReply = new KeywordAutoReply();
         autoReply.register("怎么收费", "平台费默认 0%。");
 
-        String reply = dispatcher(autoReply).handle(100L, "请问 怎么收费", ACTOR);
+        BotReply reply = dispatcher(autoReply).handle(100L, "请问 怎么收费", ACTOR);
 
-        assertThat(reply).isEqualTo("平台费默认 0%。");
+        assertThat(reply.text()).isEqualTo("平台费默认 0%。");
+        assertThat(reply.offerWebApp()).isFalse();
     }
 
     @Test
@@ -114,9 +115,9 @@ class BotDispatcherTest {
 
         BotDispatcher d = new BotDispatcher(tradeHandler(), "mybot", registry, autoReply);
 
-        String reply = d.handle(100L, "看这个 广告词", ACTOR);
+        BotReply reply = d.handle(100L, "看这个 广告词", ACTOR);
 
-        assertThat(reply).contains("违禁");
+        assertThat(reply.text()).contains("违禁");
     }
 
     @Test
@@ -131,9 +132,9 @@ class BotDispatcherTest {
         BannedWordRegistry registry = new BannedWordRegistry();
         registry.reload(100L, List.of("赌博广告"), List.of());
 
-        String reply = dispatcher(registry).handle(100L, "这里有 赌博广告 快来", ACTOR);
+        BotReply reply = dispatcher(registry).handle(100L, "这里有 赌博广告 快来", ACTOR);
 
-        assertThat(reply).contains("违禁").contains("赌博广告");
+        assertThat(reply.text()).contains("违禁").contains("赌博广告");
     }
 
     @Test
@@ -151,17 +152,28 @@ class BotDispatcherTest {
         BotDispatcher d = dispatcher();
 
         d.handle(100L, "/escrow create 2002 100 USDT", ACTOR);          // ET-34 必经的预览
-        String reply = d.handle(100L, "/escrow confirm 2002 100 USDT", ACTOR);
+        BotReply reply = d.handle(100L, "/escrow confirm 2002 100 USDT", ACTOR);
 
-        assertThat(reply).contains("已创建订单");
+        assertThat(reply.text()).contains("已创建订单");
+        assertThat(reply.offerWebApp()).isFalse();   // 正常落单回执不带表单按钮
+    }
+
+    @Test
+    @DisplayName("裸 /escrow（无子命令）→ 用法回执且引导表单（Wave 3：用户不必记命令语法）")
+    void bareEscrowOffersWebAppForm() {
+        BotReply reply = dispatcher().handle(100L, "/escrow", ACTOR);
+
+        assertThat(reply.text()).isEqualTo(TradeCommandHandler.USAGE);
+        assertThat(reply.offerWebApp()).isTrue();
     }
 
     @Test
     @DisplayName("其它命令 → 帮助回执（含用法）")
     void unknownCommandGetsHelp() {
-        String reply = dispatcher().handle(100L, "/whatever", ACTOR);
+        BotReply reply = dispatcher().handle(100L, "/whatever", ACTOR);
 
-        assertThat(reply).contains("escrow").contains("用法");
+        assertThat(reply.text()).contains("escrow").contains("用法");
+        assertThat(reply.offerWebApp()).isTrue();   // 帮助场景引导去表单
     }
 
     @Test

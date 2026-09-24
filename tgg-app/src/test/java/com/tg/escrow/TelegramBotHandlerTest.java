@@ -75,10 +75,17 @@ class TelegramBotHandlerTest {
     private static final class RecordingReply implements BotReplyPort {
         final List<String> texts = new ArrayList<>();
         final List<String> acks = new ArrayList<>();
+        /** 每次带按钮的发送记一条 "text|url"。 */
+        final List<String> webAppSends = new ArrayList<>();
 
         @Override
         public void sendText(long chatId, String text) {
             texts.add(text);
+        }
+
+        @Override
+        public void sendTextWithWebApp(long chatId, String text, String buttonText, String url) {
+            webAppSends.add(text + "|" + url);
         }
 
         @Override
@@ -105,7 +112,13 @@ class TelegramBotHandlerTest {
         }
     }
 
+    private static final String WEBAPP_URL = "https://example.test/miniapp/index.html";
+
     private static TelegramBotHandler handler(RecordingReply reply, InMemoryStore store) {
+        return handler(reply, store, WEBAPP_URL);
+    }
+
+    private static TelegramBotHandler handler(RecordingReply reply, InMemoryStore store, String webAppUrl) {
         Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
         TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
         TradeHistoryPort history = id -> new TradeAdmissionContext(id, 0, null, false);
@@ -117,7 +130,7 @@ class TelegramBotHandlerTest {
         BotDispatcher dispatcher = new BotDispatcher(trade, "mybot",
                 new BannedWordRegistry(), new KeywordAutoReply());
         return new TelegramBotHandler(BotTokenConfig.from(k -> "123456:TESTTOKEN"), dispatcher,
-                reply, "mybot");
+                reply, "mybot", webAppUrl);
     }
 
     private static Update textUpdate(long chatId, long userId, String text) {
@@ -183,6 +196,31 @@ class TelegramBotHandlerTest {
         h.consume(callbackUpdate("cb-1"));
 
         assertThat(reply.acks).containsExactly("cb-1");
+    }
+
+    @Test
+    @DisplayName("裸 /escrow（无子命令）→ 走带 WebApp 按钮的出口（sendTextWithWebApp 被调用）")
+    void bareEscrowSendsWebAppButton() {
+        RecordingReply reply = new RecordingReply();
+        TelegramBotHandler h = handler(reply, new InMemoryStore());
+
+        h.consume(textUpdate(100L, 4242L, "/escrow"));
+
+        assertThat(reply.webAppSends).hasSize(1);
+        assertThat(reply.webAppSends.get(0)).endsWith("|" + WEBAPP_URL);
+        assertThat(reply.texts).isEmpty();   // 该路径不走纯文本出口
+    }
+
+    @Test
+    @DisplayName("未配置表单 URL → 同一路径退化为纯文本（不抛、不带按钮）")
+    void bareEscrowFallsBackToPlainWhenNoUrl() {
+        RecordingReply reply = new RecordingReply();
+        TelegramBotHandler h = handler(reply, new InMemoryStore(), "");
+
+        h.consume(textUpdate(100L, 4242L, "/escrow"));
+
+        assertThat(reply.webAppSends).isEmpty();
+        assertThat(reply.texts).hasSize(1);
     }
 
     @Test

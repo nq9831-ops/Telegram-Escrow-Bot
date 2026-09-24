@@ -26,6 +26,10 @@ package com.tg.escrow;
 import com.tg.escrow.common.TggException;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardRow;
+import org.telegram.telegrambots.meta.api.objects.webapp.WebAppInfo;
 import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
 import org.telegram.telegrambots.meta.generics.TelegramClient;
 
@@ -60,6 +64,29 @@ public final class TelegramBotReplyAdapter implements BotReplyPort {
             client.execute(new SendMessage(Long.toString(chatId), text));
         } catch (TelegramApiException ex) {
             throw new TggException("回复出口：发送文本失败（chat=" + chatId + "）", ex);
+        }
+    }
+
+    @Override
+    public void sendTextWithWebApp(long chatId, String text, String buttonText, String url) {
+        if (url == null || url.isBlank()) {
+            throw new TggException("回复出口：WebApp 按钮 URL 不可为空（chat=" + chatId + "）");
+        }
+        InlineKeyboardButton button = InlineKeyboardButton.builder()
+                .text(buttonText)
+                .webApp(WebAppInfo.builder().url(url).build())
+                .build();
+        InlineKeyboardMarkup markup = InlineKeyboardMarkup.builder()
+                .keyboardRow(new InlineKeyboardRow(button))
+                .build();
+        try {
+            client.execute(SendMessage.builder()
+                    .chatId(Long.toString(chatId))
+                    .text(text)
+                    .replyMarkup(markup)
+                    .build());
+        } catch (TelegramApiException ex) {
+            throw new TggException("回复出口：发送 WebApp 按钮消息失败（chat=" + chatId + "）", ex);
         }
     }
 

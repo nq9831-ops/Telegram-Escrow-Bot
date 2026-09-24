@@ -46,19 +46,24 @@ import org.telegram.telegrambots.meta.api.objects.Update;
  */
 public final class TelegramBotHandler implements LongPollingSingleThreadUpdateConsumer {
 
+    /** 「打开表单」按钮文字。 */
+    private static final String WEBAPP_BUTTON_TEXT = "📝 打开表单";
+
     private final BotTokenConfig tokenConfig;
     private final BotDispatcher dispatcher;
     private final BotReplyPort reply;
     private final String botUsername;
+    private final String webAppUrl;
 
     /**
      * @param tokenConfig token 配置（构造期已 fail-fast）
      * @param dispatcher  命令分发器
      * @param reply       回复出口（TelegramClient 适配器实现）
      * @param botUsername 本 bot 用户名（不含 {@code @}）
+     * @param webAppUrl   Mini App 表单地址（HTTPS）；为空则「引导表单」的回执退化为纯文本、不带按钮
      */
     public TelegramBotHandler(BotTokenConfig tokenConfig, BotDispatcher dispatcher,
-                             BotReplyPort reply, String botUsername) {
+                             BotReplyPort reply, String botUsername, String webAppUrl) {
         if (tokenConfig == null || dispatcher == null || reply == null) {
             throw new com.tg.escrow.common.TggException("Bot 接线：token/分发器/回复出口均不可为空");
         }
@@ -66,6 +71,7 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
         this.dispatcher = dispatcher;
         this.reply = reply;
         this.botUsername = botUsername;
+        this.webAppUrl = webAppUrl;
     }
 
     /** bot token（10.x 架构中 token 由注册方（TelegramBotsLongPollingApplication）持有，非接口方法）。 */
@@ -92,9 +98,14 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
                 // 角色保守取 MEMBER：权限只能收紧，不放松（真实角色上线接入后升级）
                 CommandActor actor = new CommandActor(userId, MemberRole.MEMBER);
                 String text = update.getMessage().getText();
-                String response = dispatcher.handle(chatId, text, actor);
-                if (response != null) {
-                    reply.sendText(chatId, response);
+                BotReply out = dispatcher.handle(chatId, text, actor);
+                if (out != null && out.text() != null) {
+                    if (out.offerWebApp() && webAppUrl != null && !webAppUrl.isBlank()) {
+                        // 用法/帮助场景：附「打开表单」按钮，用户不必记命令语法
+                        reply.sendTextWithWebApp(chatId, out.text(), WEBAPP_BUTTON_TEXT, webAppUrl);
+                    } else {
+                        reply.sendText(chatId, out.text());
+                    }
                 }
             }
             // 按钮交互的命令扩展在 S3 接入；当前 callback 仅应答

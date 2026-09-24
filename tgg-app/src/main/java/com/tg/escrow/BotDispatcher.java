@@ -78,9 +78,9 @@ public final class BotDispatcher {
      * @param chatId 会话/群 ID（违禁词按群取词库）
      * @param text   消息文本
      * @param actor  发起人
-     * @return 回执文本；{@code null} 表示<b>不响应</b>
+     * @return 回执（正文 + 是否附「打开表单」入口）；{@code null} 表示<b>不响应</b>
      */
-    public String handle(long chatId, String text, CommandActor actor) {
+    public BotReply handle(long chatId, String text, CommandActor actor) {
         if (text == null || actor == null) {
             return null;
         }
@@ -88,16 +88,20 @@ public final class BotDispatcher {
         if (parsed.isPresent()) {
             com.tg.escrow.core.BotCommand cmd = parsed.get();
             if (tradeHandler.canHandle(cmd)) {
-                return tradeHandler.handle(cmd, actor);
+                String reply = tradeHandler.handle(cmd, actor);
+                // "/escrow" 无子命令或参数不全 → 用法说明：正是该引导用户去表单的时刻
+                return TradeCommandHandler.USAGE.equals(reply)
+                        ? BotReply.withWebApp(reply)
+                        : BotReply.plain(reply);
             }
-            return HELP;
+            return BotReply.withWebApp(HELP);
         }
         // 1) 违禁词优先（安全 > 应答）
         Optional<BannedWordMatcher.Match> hit = bannedWords.firstMatch(chatId, text);
         if (hit.isPresent()) {
-            return "⚠️ 消息含违禁内容（命中规则：" + hit.get().rule() + "），请文明交流。";
+            return BotReply.plain("⚠️ 消息含违禁内容（命中规则：" + hit.get().rule() + "），请文明交流。");
         }
         // 2) 自动回复
-        return autoReply.replyFor(text).orElse(null);
+        return autoReply.replyFor(text).map(BotReply::plain).orElse(null);
     }
 }

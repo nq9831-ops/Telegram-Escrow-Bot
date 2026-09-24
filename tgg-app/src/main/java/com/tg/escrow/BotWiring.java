@@ -157,7 +157,8 @@ public class BotWiring {
     public TelegramBotHandler telegramBotHandler(BotTokenConfig tokenConfig,
                                                  BotDispatcher dispatcher,
                                                  BotReplyPort reply,
-                                                 @Value("${tgg.bot.username}") String botUsername) {
-        return new TelegramBotHandler(tokenConfig, dispatcher, reply, botUsername);
+                                                 @Value("${tgg.bot.username}") String botUsername,
+                                                 @Value("${tgg.webapp.url:}") String webAppUrl) {
+        return new TelegramBotHandler(tokenConfig, dispatcher, reply, botUsername, webAppUrl);
     }
 }
