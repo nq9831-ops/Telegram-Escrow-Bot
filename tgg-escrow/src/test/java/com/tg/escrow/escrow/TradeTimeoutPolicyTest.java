@@ -107,6 +107,29 @@ class TradeTimeoutPolicyTest {
     }
 
     @Test
+    @DisplayName("DISPUTED 永不被超时逻辑改写（争议优先级 > 超时）——显式钉住该不变量")
+    void disputedNeverTimesOut() {
+        TradeTimeoutPolicy p = policy();
+
+        // 现状：DISPUTED 未登记于规则表 → 即使停留一年，也不触发任何超时动作。
+        // 这保证"维护期争议暂停"不会被超时逻辑绕过（见 docs/requirements/08-业务逻辑冲突审查.md 的 1.4）。
+        TradeTimeoutPolicy.TimeoutDecision d =
+                p.check(State.DISPUTED, T0, T0.plus(Duration.ofDays(365)));
+
+        assertThat(d.timedOut()).isFalse();
+        assertThat(d.action()).isEqualTo(TimeoutAction.NONE);
+
+        // 对照：证明本测试"有能力捕获回归"——把 DISPUTED 登记进规则表时，超时确实会生效。
+        // 因此若将来有人误把 DISPUTED 写进规则表，上面的断言会立刻变红（而非静默失效）。
+        TradeTimeoutPolicy withDispute = new TradeTimeoutPolicy(Map.of(
+                State.DISPUTED, new TradeTimeoutPolicy.TimeoutRule(
+                        Duration.ofHours(72), TimeoutAction.AUTO_REFUND)));
+        assertThat(withDispute.check(State.DISPUTED, T0, T0.plus(Duration.ofDays(4))).timedOut())
+                .as("登记后应能超时——证明上一条断言是有效防线")
+                .isTrue();
+    }
+
+    @Test
     @DisplayName("构造期校验：规则表为空 / 含 null 规则 → 拒绝")
     void invalidRulesRejected() {
         assertThatThrownBy(() -> new TradeTimeoutPolicy(null))
