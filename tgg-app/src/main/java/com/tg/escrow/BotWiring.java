@@ -24,8 +24,10 @@
 package com.tg.escrow;
 
 import com.tg.escrow.core.BannedWordRegistry;
+import com.tg.escrow.core.GroupAdminPort;
 import com.tg.escrow.core.KeywordAutoReply;
 import com.tg.escrow.core.MemberRolePort;
+import com.tg.escrow.core.ModerationOrchestrator;
 import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowOrder;
 import com.tg.escrow.escrow.EscrowOrderLookupPort;
@@ -250,12 +252,36 @@ public class BotWiring {
         return new TelegramMemberRoleAdapter(client);
     }
 
+    /** 群管理动作端口（Wave 2：Telegram 实现——踢/封/禁言/删消息）。 */
+    @Bean
+    public GroupAdminPort groupAdminPort(TelegramClient client, Clock clock) {
+        return new TelegramGroupAdminAdapter(client, clock);
+    }
+
+    /**
+     * 处置编排（Wave 3：把此前零生产消费者的编排层接上线）。
+     *
+     * <p>联邦旁路不在此配置——未配置即 {@code fail-closed} 关闭（普通管理路径的单调守卫一行未动）。
+     */
+    @Bean
+    public ModerationOrchestrator moderationOrchestrator(GroupAdminPort port) {
+        return new ModerationOrchestrator(port);
+    }
+
+    /** 群管理命令处理器（/kick /ban /mute /del）。 */
+    @Bean
+    public ModerationCommandHandler moderationCommandHandler(ModerationOrchestrator moderation,
+                                                            MemberRolePort roles) {
+        return new ModerationCommandHandler(moderation, roles);
+    }
+
     @Bean
     public BotDispatcher botDispatcher(TradeCommandHandler tradeHandler,
                                        BannedWordRegistry bannedWords,
                                        KeywordAutoReply autoReply,
+                                       ModerationCommandHandler moderationHandler,
                                        @Value("${tgg.bot.username}") String botUsername) {
-        return new BotDispatcher(tradeHandler, botUsername, bannedWords, autoReply);
+        return new BotDispatcher(tradeHandler, botUsername, bannedWords, autoReply, moderationHandler);
     }
 
     @Bean

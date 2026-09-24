@@ -25,6 +25,7 @@ package com.tg.escrow;
 
 import com.tg.escrow.core.BannedWordRegistry;
 import com.tg.escrow.core.KeywordAutoReply;
+import com.tg.escrow.core.ModerationOrchestrator;
 import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowOrder;
 import com.tg.escrow.escrow.EscrowOrderLookupPort;
@@ -180,7 +181,24 @@ class TelegramBotHandlerTest {
                 noopReviewService(clock),
                 maintenanceService(clock));
         BotDispatcher dispatcher = new BotDispatcher(trade, "mybot",
-                new BannedWordRegistry(), new KeywordAutoReply());
+                new BannedWordRegistry(), new KeywordAutoReply(),
+                new ModerationCommandHandler(new ModerationOrchestrator(new com.tg.escrow.core.GroupAdminPort() {
+                    @Override
+                    public void kick(long guildId, long userId) {
+                    }
+
+                    @Override
+                    public void ban(long guildId, long userId) {
+                    }
+
+                    @Override
+                    public void mute(long guildId, long userId, java.time.Duration duration) {
+                    }
+
+                    @Override
+                    public void deleteMessage(long guildId, long messageId) {
+                    }
+                }), (chatId, userId) -> com.tg.escrow.core.MemberRole.MEMBER));
         return new TelegramBotHandler(BotTokenConfig.from(k -> "123456:TESTTOKEN"), dispatcher,
                 reply, "mybot", webAppUrl,
                 (chatId, userId) -> com.tg.escrow.core.MemberRole.MEMBER);

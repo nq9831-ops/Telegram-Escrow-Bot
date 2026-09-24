@@ -50,28 +50,36 @@ public final class BotDispatcher {
     private static final String HELP = "我是担保交易助手。用法：/escrow invite <金额> <币种> 生成邀请链接"
             + "（对方点开即接单）；/escrow create <卖方ID> <金额> <币种> 预览风险，"
             + "确认后 /escrow confirm 创建交易；/escrow lock|deliver|release|refund|dispute <订单号> "
-            + "推进交易；/escrow status <订单号> 查询状态。";
+            + "推进交易；/escrow status <订单号> 查询状态。"
+            + "群管理（管理员）：/kick <用户ID>、/ban <用户ID>、/mute <用户ID> <分钟>、/del <消息ID>。";
 
     private final TradeCommandHandler tradeHandler;
     private final String botUsername;
     private final BannedWordRegistry bannedWords;
     private final KeywordAutoReply autoReply;
+    private final ModerationCommandHandler moderationHandler;
 
     /**
-     * @param tradeHandler 交易命令处理器
-     * @param botUsername  本 bot 用户名（不含 {@code @}）
-     * @param bannedWords  违禁词注册表
-     * @param autoReply    自动回复（GM-17 的生产消费者）
+     * @param tradeHandler      交易命令处理器
+     * @param botUsername       本 bot 用户名（不含 {@code @}）
+     * @param bannedWords       违禁词注册表
+     * @param autoReply         自动回复（GM-17 的生产消费者）
+     * @param moderationHandler 群管理命令处理器（Wave 3：/kick /ban /mute /del）
      */
     public BotDispatcher(TradeCommandHandler tradeHandler, String botUsername,
-                         BannedWordRegistry bannedWords, KeywordAutoReply autoReply) {
+                         BannedWordRegistry bannedWords, KeywordAutoReply autoReply,
+                         ModerationCommandHandler moderationHandler) {
         if (tradeHandler == null || bannedWords == null || autoReply == null) {
             throw new TggException("命令分发：处理器/违禁词注册表/自动回复均不可为空");
+        }
+        if (moderationHandler == null) {
+            throw new TggException("命令分发：群管理命令处理器不可为空");
         }
         this.tradeHandler = tradeHandler;
         this.botUsername = botUsername;
         this.bannedWords = bannedWords;
         this.autoReply = autoReply;
+        this.moderationHandler = moderationHandler;
     }
 
     /**
@@ -89,6 +97,10 @@ public final class BotDispatcher {
         Optional<com.tg.escrow.core.BotCommand> parsed = CommandParser.parse(text, botUsername);
         if (parsed.isPresent()) {
             com.tg.escrow.core.BotCommand cmd = parsed.get();
+            // 处置命令优先：安全动作不该排队在业务应答之后（与违禁词优先同一取向）
+            if (moderationHandler.canHandle(cmd)) {
+                return BotReply.plain(moderationHandler.handle(cmd, actor, chatId));
+            }
             if (tradeHandler.canHandle(cmd)) {
                 String reply = tradeHandler.handle(cmd, actor);
                 // "/escrow" 无子命令或参数不全 → 用法说明：正是该引导用户去表单的时刻

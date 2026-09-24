@@ -25,8 +25,11 @@ package com.tg.escrow;
 
 import com.tg.escrow.core.BannedWordRegistry;
 import com.tg.escrow.core.CommandActor;
+import com.tg.escrow.core.GroupAdminPort;
 import com.tg.escrow.core.KeywordAutoReply;
 import com.tg.escrow.core.MemberRole;
+import com.tg.escrow.core.MemberRolePort;
+import com.tg.escrow.core.ModerationOrchestrator;
 import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowOrder;
 import com.tg.escrow.escrow.EscrowOrderStore;
@@ -128,12 +131,33 @@ class BotDispatcherTest {
         return new TradeMaintenanceService(window, policy, clock);
     }
 
+    /** 本类不测群管理路径——给个空实现让装配成形（命令由 ModerationCommandHandlerTest 覆盖）。 */
+    private static ModerationCommandHandler noopModeration() {
+        return new ModerationCommandHandler(new ModerationOrchestrator(new GroupAdminPort() {
+            @Override
+            public void kick(long guildId, long userId) {
+            }
+
+            @Override
+            public void ban(long guildId, long userId) {
+            }
+
+            @Override
+            public void mute(long guildId, long userId, java.time.Duration duration) {
+            }
+
+            @Override
+            public void deleteMessage(long guildId, long messageId) {
+            }
+        }), (chatId, userId) -> MemberRole.MEMBER);
+    }
+
     private static BotDispatcher dispatcher(BannedWordRegistry registry) {
-        return new BotDispatcher(tradeHandler(), "mybot", registry, new KeywordAutoReply());
+        return new BotDispatcher(tradeHandler(), "mybot", registry, new KeywordAutoReply(), noopModeration());
     }
 
     private static BotDispatcher dispatcher(KeywordAutoReply autoReply) {
-        return new BotDispatcher(tradeHandler(), "mybot", new BannedWordRegistry(), autoReply);
+        return new BotDispatcher(tradeHandler(), "mybot", new BannedWordRegistry(), autoReply, noopModeration());
     }
 
     private static BotDispatcher dispatcher() {
@@ -160,7 +184,7 @@ class BotDispatcherTest {
         BannedWordRegistry registry = new BannedWordRegistry();
         registry.reload(100L, List.of("广告词"), List.of());
 
-        BotDispatcher d = new BotDispatcher(tradeHandler(), "mybot", registry, autoReply);
+        BotDispatcher d = new BotDispatcher(tradeHandler(), "mybot", registry, autoReply, noopModeration());
 
         BotReply reply = d.handle(100L, "看这个 广告词", ACTOR);
 
