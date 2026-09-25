@@ -28,8 +28,8 @@
 
 | # | 事项 | 怎么验 | 期望观察 | 状态 |
 |---|---|---|---|---|
-| B1 | `EscrowContract.tolk` 编译 | Blueprint/Acton build | 编译通过（当前**仅源码+注释**） | ☐ |
-| B2 | Gas 基线报告 | `blueprint test --gas-report --snapshot` | 出基线，后续版本对比 | ☐ |
+| B1 | `EscrowContract.tolk` 编译 | `acton build` | 编译通过 —— ✅ 2026-09-25 接入 Acton v1.2.0，`acton build` 与 `acton test`（2 passed）均通过（**骨架阶段**：资金逻辑待 C1 定案；commit 5535e32） | ✅ |
+| B2 | Gas 基线报告 | `acton test --gas-profile <FILE>`（或 `[test] gas-profile` 配置） | 出基线，后续版本对比 | ☐ |
 | B3 | **乱序消息不越级迁移**（ET-58） | 合约测试：confirm/deliver 同时发 | 状态机不越级（SPEC S5 验收） | ☐ |
 | B4 | 交付证明哈希加盐（ET-57） | 提交常见短语 proofHash | 不可字典反推 | ☐ |
 | B5 | 链上事件/资金验证（ET-19/59 + S4） | `HttpChainSource` 双源对账 | 交叉验证一致（D：TON 确认数语义须先核实） | ☐ |
