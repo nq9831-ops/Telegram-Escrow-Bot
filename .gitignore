@@ -55,3 +55,16 @@ Thumbs.db
 
 # ── 部署产物（可能含地址或凭据）─────────────────────
 deploy-output/
+
+# Acton related files
+.acton/
+.studio/
+gen/
+lcov.info
+libraries.toml
+global.libraries.toml
+
+# Mnemonic and wallet files
+*.mnemonic
+wallets.toml
+global.wallets.toml
