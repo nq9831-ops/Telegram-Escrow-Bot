@@ -29,6 +29,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
@@ -63,6 +64,14 @@ class EscrowPersistenceIT {
 
     @Autowired
     private EntityManager entityManager;
+
+    /**
+     * 屏蔽常驻长轮询：{@link BotRunner} 是 {@code SmartLifecycle}，上下文启动时会用 token
+     * 去连真实 Telegram——无真实凭证即 401 抛错、整个上下文起不来。本 IT 验证的是装配、
+     * 迁移与映射，<b>不测 Telegram 连接</b>，故用替身拦截这一步（否则该 IT 只能挂真 token 跑）。
+     */
+    @MockitoBean
+    private BotRunner botRunner;
 
     @Test
     @DisplayName("上下文启动即完成 Flyway 迁移与 JPA 结构校验")

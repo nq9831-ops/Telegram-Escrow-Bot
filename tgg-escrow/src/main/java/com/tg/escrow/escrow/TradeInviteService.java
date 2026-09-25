@@ -66,7 +66,9 @@ import java.util.function.Supplier;
  * <p>令牌由注入的 {@link Supplier} 生成，生产用 {@link #secureRandomTokenSupplier()}；
  * 时钟由构造注入使有效期判定可测、且同一路径内时刻一致。
  */
-public final class TradeInviteService {
+// 刻意非 final：accept() 带 @Transactional，Spring 需为这个无接口的类生成 CGLIB 子类代理；
+// final 类无法子类化，会在装配期抛 "Could not generate CGLIB subclass"（实测首次 mvn verify 即如此）。
+public class TradeInviteService {
 
     private final TradeAdmissionGate gate;
     private final TradeHistoryPort historyPort;
