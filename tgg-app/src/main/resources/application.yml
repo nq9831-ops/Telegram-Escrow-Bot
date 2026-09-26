@@ -46,6 +46,13 @@ tgg:
     initdata:
       # initData 验签允许的最大时延（防重放）
       max-age: ${TGG_WEBAPP_INITDATA_MAX_AGE:PT1H}
+  notify:
+    # 静默时段（G19）：只压制「待对方行动」类通知的响铃；资金/争议类一概响铃，且
+    # disable_notification 只关响铃、不影响送达。留空 = 不启用（不做静默判定）。
+    # 跨午夜写法：silence-start=22:00 && silence-end=02:00
+    silence-start: ${TGG_NOTIFY_SILENCE_START:}
+    silence-end: ${TGG_NOTIFY_SILENCE_END:}
+    silence-zone: ${TGG_NOTIFY_SILENCE_ZONE:UTC}
 
 logging:
   level:

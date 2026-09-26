@@ -33,6 +33,7 @@ import com.tg.escrow.core.MessageGuardOrchestrator;
 import com.tg.escrow.core.ModerationOrchestrator;
 import com.tg.escrow.core.RateLimitPolicy;
 import com.tg.escrow.core.RateLimiter;
+import com.tg.escrow.core.SilenceWindow;
 import com.tg.escrow.core.WarningOrchestrator;
 import com.tg.escrow.core.WarningPolicy;
 import com.tg.escrow.moderation.WarningPort;
@@ -69,6 +70,8 @@ import org.telegram.telegrambots.meta.generics.TelegramClient;
 import java.math.BigDecimal;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.LocalTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Map;
 
@@ -408,5 +411,27 @@ public class BotWiring {
                                                  MemberJoinHandler memberJoinHandler) {
         return new TelegramBotHandler(tokenConfig, dispatcher, reply, botUsername, webAppUrl,
                 memberRolePort, memberJoinHandler);
+    }
+
+    /**
+     * 交易对手方通知器：入口层在状态迁移<b>成功后</b>调用它。
+     *
+     * <p>静默窗口是<b>可选</b>配置——未配置即传 {@code null}（不做静默判定），而不是给一个
+     * "默认不静默的窗口"：后者会让"没配"与"配了但没命中"在代码上无法区分。
+     */
+    @Bean
+    public TradeNotifier tradeNotifier(BotReplyPort reply, Clock clock,
+                                       @Value("${tgg.notify.silence-start:}") String silenceStart,
+                                       @Value("${tgg.notify.silence-end:}") String silenceEnd,
+                                       @Value("${tgg.notify.silence-zone:UTC}") String silenceZone) {
+        return new TradeNotifier(reply, clock, silenceWindow(silenceStart, silenceEnd, silenceZone));
+    }
+
+    /** 起止任一为空即不启用静默窗口（返回 {@code null}）；跨午夜（如 22:00–02:00）由 SilenceWindow 处理。 */
+    private static SilenceWindow silenceWindow(String start, String end, String zone) {
+        if (start == null || start.isBlank() || end == null || end.isBlank()) {
+            return null;
+        }
+        return new SilenceWindow(LocalTime.parse(start), LocalTime.parse(end), ZoneId.of(zone));
     }
 }
