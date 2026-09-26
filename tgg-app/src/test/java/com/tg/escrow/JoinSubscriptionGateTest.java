@@ -57,9 +57,43 @@ class JoinSubscriptionGateTest {
     private static final String REQUIRED = "@must_join";
     private static final MemberJoined JOINED = new MemberJoined(CHAT, "测试群", USER, "小明");
 
+    @Test
+    @DisplayName("【链路】入群爆发 → 自动开启保护 → 该成员被移出（检测确实接在处置之前）")
+    void burstLeadsToRemovalThroughGate() {
+        ProtectionMode mode = new ProtectionMode();
+        GroupAdminPort admin = mock(GroupAdminPort.class);
+        com.tg.escrow.core.JoinBurstGuard burst = new com.tg.escrow.core.JoinBurstGuard(
+                java.time.Duration.ofMinutes(1), 1, java.time.Duration.ofMinutes(10), mode,
+                java.time.Clock.fixed(java.time.Instant.parse("2026-09-25T12:00:00Z"),
+                        java.time.ZoneOffset.UTC));
+        JoinSubscriptionGate gate = new JoinSubscriptionGate(
+                new ChannelSubscriptionCheck(Set.of(REQUIRED)),
+                // 订阅没问题：本用例只验证爆发那条路径
+                (channel, userId) -> ChannelMembershipPort.Membership.SUBSCRIBED,
+                admin, new MemberJoinHandler(mode, new WelcomeTemplate("欢迎 {username} 加入"), admin),
+                Set.of(REQUIRED), burst);
+
+        gate.onMemberJoined(JOINED);                          // 1 次：未超上限 → 正常欢迎
+
+        Optional<String> out = gate.onMemberJoined(JOINED);   // 2 次：> 1 → 爆发 → 保护开启 → 移出
+
+        verify(admin).kick(CHAT, USER);
+        assertThat(out).isPresent();
+        assertThat(out.get())
+                .as("爆发触发后，紧接着入群的人应当被保护模式拦下")
+                .contains("保护模式");
+    }
+
     private static MemberJoinHandler inner() {
         return new MemberJoinHandler(new ProtectionMode(), new WelcomeTemplate("欢迎 {username} 加入"),
                 mock(GroupAdminPort.class));
+    }
+
+    /** 本类测订阅判定；爆发保护用未启用实例（它由 JoinBurstGuardTest 覆盖）。 */
+    private static com.tg.escrow.core.JoinBurstGuard noBurst() {
+        return com.tg.escrow.core.JoinBurstGuard.disabled(new ProtectionMode(),
+                java.time.Clock.fixed(java.time.Instant.parse("2026-09-25T12:00:00Z"),
+                        java.time.ZoneOffset.UTC));
     }
 
     private static JoinSubscriptionGate gate(GroupAdminPort admin,
@@ -67,7 +101,7 @@ class JoinSubscriptionGateTest {
         return new JoinSubscriptionGate(
                 new ChannelSubscriptionCheck(Set.of(REQUIRED)),
                 (channel, userId) -> membership,
-                admin, inner(), Set.of(REQUIRED));
+                admin, inner(), Set.of(REQUIRED), noBurst());
     }
 
     @Test
@@ -122,7 +156,7 @@ class JoinSubscriptionGateTest {
                     queries.incrementAndGet();
                     return ChannelMembershipPort.Membership.UNKNOWN;
                 },
-                mock(GroupAdminPort.class), inner(), Set.of());
+                mock(GroupAdminPort.class), inner(), Set.of(), noBurst());
 
         Optional<String> out = gate.onMemberJoined(JOINED);
 
@@ -137,7 +171,7 @@ class JoinSubscriptionGateTest {
         assertThatThrownBy(() -> new JoinSubscriptionGate(
                 new ChannelSubscriptionCheck(Set.of("@other")),   // 白名单不含 REQUIRED
                 (channel, userId) -> ChannelMembershipPort.Membership.SUBSCRIBED,
-                mock(GroupAdminPort.class), inner(), Set.of(REQUIRED)))
+                mock(GroupAdminPort.class), inner(), Set.of(REQUIRED), noBurst()))
                 .as("配置错若只在入群时才被 System.err 吞掉，群治理会静默失效")
                 .isInstanceOf(com.tg.escrow.common.TggException.class);
     }

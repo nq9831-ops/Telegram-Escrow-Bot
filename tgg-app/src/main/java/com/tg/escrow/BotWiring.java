@@ -427,9 +427,24 @@ public class BotWiring {
     public JoinSubscriptionGate joinSubscriptionGate(
             ChannelSubscriptionCheck check, ChannelMembershipPort membership, GroupAdminPort admin,
             MemberJoinHandler memberJoinHandler,
-            @Value("${tgg.join.required-channels:}") String requiredChannels) {
+            @Value("${tgg.join.required-channels:}") String requiredChannels,
+            com.tg.escrow.core.JoinBurstGuard joinBurstGuard) {
         return new JoinSubscriptionGate(check, membership, admin, memberJoinHandler,
-                new java.util.LinkedHashSet<>(splitCsv(requiredChannels)));
+                new java.util.LinkedHashSet<>(splitCsv(requiredChannels)), joinBurstGuard);
+    }
+
+    /**
+     * 入群爆发保护（把 {@code ProtectionMode} 文档承诺的"由滑动窗口检测触发"变成实现）。
+     *
+     * <p>{@code tgg.protection.max-joins} 未配置（默认 0）即<b>不检测</b>——默认不改行为。
+     */
+    @Bean
+    public com.tg.escrow.core.JoinBurstGuard joinBurstGuard(
+            com.tg.escrow.core.ProtectionMode protection, Clock clock,
+            @Value("${tgg.protection.window:PT1M}") Duration window,
+            @Value("${tgg.protection.max-joins:0}") int maxJoins,
+            @Value("${tgg.protection.cooldown:PT10M}") Duration cooldown) {
+        return new com.tg.escrow.core.JoinBurstGuard(window, maxJoins, cooldown, protection, clock);
     }
 
     @Bean

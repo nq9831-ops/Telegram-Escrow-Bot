@@ -291,7 +291,8 @@ class TelegramBotHandlerTest {
                         new MemberJoinHandler(protection,
                                 new com.tg.escrow.core.WelcomeTemplate("欢迎 {username}"), admin),
                         // 必订频道留空：本类测的是入群文案与保护模式，订阅门禁由 JoinSubscriptionGateTest 覆盖
-                        java.util.Set.of()));
+                        java.util.Set.of(),
+                        com.tg.escrow.core.JoinBurstGuard.disabled(protection, clock)));
     }
 
     private static Update textUpdate(long chatId, long userId, String text) {

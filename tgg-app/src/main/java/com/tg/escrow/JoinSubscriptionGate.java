@@ -61,6 +61,7 @@ public final class JoinSubscriptionGate {
     private final GroupAdminPort admin;
     private final MemberJoinHandler inner;
     private final Set<String> requiredChannels;
+    private final com.tg.escrow.core.JoinBurstGuard burstGuard;
 
     /**
      * @param check            订阅判定（白名单 + 必订校验）
@@ -68,21 +69,27 @@ public final class JoinSubscriptionGate {
      * @param admin            群管理动作端口（踢人）
      * @param inner            通过验证后的入群处理（欢迎 / 保护模式）
      * @param requiredChannels 必订频道（空集 = 不启用本门禁）
+     * @param burstGuard       入群爆发保护（未配置上限时传 {@code JoinBurstGuard.disabled(...)}）
      */
     public JoinSubscriptionGate(ChannelSubscriptionCheck check, ChannelMembershipPort membership,
                                GroupAdminPort admin, MemberJoinHandler inner,
-                               Set<String> requiredChannels) {
+                               Set<String> requiredChannels,
+                               com.tg.escrow.core.JoinBurstGuard burstGuard) {
         if (check == null || membership == null || admin == null || inner == null) {
             throw new TggException("入群订阅门卫：判定器/查询端口/管理动作端口/入群处理器均不可为空");
         }
         if (requiredChannels == null) {
             throw new TggException("入群订阅门卫：必订频道集合不可为空引用（不启用请传 Set.of()）");
         }
+        if (burstGuard == null) {
+            throw new TggException("入群订阅门卫：爆发保护不可为空（不启用请传 JoinBurstGuard.disabled(...)）");
+        }
         this.check = check;
         this.membership = membership;
         this.admin = admin;
         this.inner = inner;
         this.requiredChannels = Set.copyOf(requiredChannels);
+        this.burstGuard = burstGuard;
         // 配置自检：必订频道不在白名单时 passes 会抛——在此触发即「启动期 fail-fast」，
         // 而不是等第一个用户入群才在日志里淹掉（那会让群治理静默失效）。
         check.passes(Set.of(), this.requiredChannels);
@@ -98,6 +105,9 @@ public final class JoinSubscriptionGate {
         if (joined == null) {
             throw new TggException("入群订阅门卫：事件不可为空");
         }
+        // 先记一次入群：爆发时会开启保护模式，随后的保护判定（在 inner 里）就会把这个
+        // 刚入群的人移出。顺序刻意如此——检测要在处置之前。
+        burstGuard.onJoin();
         if (requiredChannels.isEmpty()) {
             return inner.onMemberJoined(joined);
         }

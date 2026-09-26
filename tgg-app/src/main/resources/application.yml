@@ -59,6 +59,14 @@ tgg:
     # （门卫会拒绝执行并留痕，绝不因此踢人）。required 留空 = 不启用（不查也不拦）。
     required-channels: ${TGG_JOIN_REQUIRED_CHANNELS:}
     allowed-channels: ${TGG_JOIN_ALLOWED_CHANNELS:}
+  protection:
+    # 启动时是否直接开启保护模式（开启后新入群者会被移出）。默认 false。
+    enabled: ${TGG_PROTECTION_ENABLED:false}
+    # 入群爆发保护：窗口内入群数「严格超过」max-joins 次即自动开启保护模式，
+    # 冷却期满且未再爆发则自动解除（惰性判定，无需调度器）。max-joins 留 0 = 不检测。
+    window: ${TGG_PROTECTION_WINDOW:PT1M}
+    max-joins: ${TGG_PROTECTION_MAX_JOINS:0}
+    cooldown: ${TGG_PROTECTION_COOLDOWN:PT10M}
 
 logging:
   level:
