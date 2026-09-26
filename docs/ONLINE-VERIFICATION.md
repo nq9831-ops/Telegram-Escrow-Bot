@@ -23,8 +23,8 @@
 | A6 | **`/escrow cancel` 端到端** | 私聊发 `/escrow cancel 1` | 回执「已取消」且**库里 state 变 CANCELLED** | ✅ 2026-09-24 实测：`escrow_orders` id=1 → `state=CANCELLED`、`version=0→1`、`reason=当事人取消` |
 | A7 | **乐观锁在生产库生效** | 同上（观察 version 列） | 写入后 `version` 自增 | ✅ 2026-09-24：`version 0 → 1`（证明 `@Version` 在真库上工作） |
 | A8 | `/escrow status` 生产回执 | 私聊发 `/escrow status 1` | 回订单号 + 状态摘要 + 下一步 | ⚠️ **部分验证**：同链路（dispatcher→handler）已由 A6 端到端证通，且本地 `TradeCommandHandlerTest` 覆盖三条 status 用例；但**生产回执未亲眼确认**（status 只读，DB 不留痕，用户未回报文） |
-| A9 | **对手方主动通知** | 甲私聊 bot 走 `/escrow confirm` → `/escrow lock`，乙（卖方）应在私聊收到通知；再让乙发 `/escrow deliver`，甲应收到 | 对方收到通知；**命令路径**在对方未与 bot 会话过时，发起方回执追加「对方可能收不到通知」；**Web 路径**（Mini App）同情形下只返回 `notified:false`、不产生文案（前端据此提示） |
-| A10 | **入群订阅门禁（GM-16/T60）** | 配置 `TGG_JOIN_REQUIRED_CHANNELS`（须落在 `TGG_JOIN_ALLOWED_CHANNELS` 白名单内），再让一个未订阅者入群 | 未订阅者被踢出并收到"请先订阅"提示；已订阅者正常收到欢迎语；**查询失败时应既不踢也不欢迎**（回"无法确认"） | ☐ **未验**——门卫与适配器已由 `JoinSubscriptionGateTest` / `TelegramChannelMembershipAdapterTest` 覆盖，但真实 `getChatMember` 与真实踢人无 token 无法验 |
+| A9 | **对手方主动通知** | 甲私聊 bot 走 `/escrow confirm` → `/escrow lock`，乙（卖方）应在私聊收到通知；再让乙发 `/escrow deliver`，甲应收到 | 对方收到通知；**命令路径**在对方未与 bot 会话过时，发起方回执追加「对方可能收不到通知」；**Web 路径**（Mini App）同情形下只返回 `notified:false`、不产生文案（前端据此提示） | ☐ **未验**——通知路径已由 `TradeNotifierTest` / `TradeCommandHandlerTest` / 两个 Web 控制器测试覆盖，但真实 Telegram 发送无 token 无法验 |
+| A10 | **入群订阅门禁（GM-16/T60）** | 配置 `TGG_JOIN_REQUIRED_CHANNELS`（须落在 `TGG_JOIN_ALLOWED_CHANNELS` 白名单内），再让一个未订阅者入群 | 未订阅者被移出，且**群内回执是群视角**（「新成员因未订阅 X 已被移出」——不是对被移出者说话，他看不到）；已订阅者正常收到欢迎语；**查询失败时应既不踢也不欢迎**（回"无法确认"） | ☐ **未验**——门卫与适配器已由 `JoinSubscriptionGateTest` / `TelegramChannelMembershipAdapterTest` 覆盖，但真实 `getChatMember` 与真实踢人无 token 无法验 |
 
 ## B. 依赖真实链（S5 合约 + C1 定案 + D 核实）
 

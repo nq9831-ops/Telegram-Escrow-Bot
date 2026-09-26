@@ -71,7 +71,7 @@ class JoinSubscriptionGateTest {
     }
 
     @Test
-    @DisplayName("明确未订阅 → 真的踢出去 + 回执要求先订阅（门禁要执行，不能只是叨叨）")
+    @DisplayName("明确未订阅 → 真的踢出去，回执按群视角说明（门禁要执行，不能只是叨叨）")
     void notSubscribedIsKicked() {
         GroupAdminPort admin = mock(GroupAdminPort.class);
 
