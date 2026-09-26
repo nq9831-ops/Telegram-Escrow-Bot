@@ -24,6 +24,7 @@
 package com.tg.escrow;
 
 import com.tg.escrow.common.TggException;
+import com.tg.escrow.core.NoticePolicy;
 import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
 import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
 import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
@@ -62,6 +63,29 @@ public final class TelegramBotReplyAdapter implements BotReplyPort {
     public void sendText(long chatId, String text) {
         try {
             client.execute(new SendMessage(Long.toString(chatId), text));
+        } catch (TelegramApiException ex) {
+            throw new TggException("回复出口：发送文本失败（chat=" + chatId + "）", ex);
+        }
+    }
+
+    /**
+     * 带通知策略的文本回执：{@link NoticePolicy#silent()} → {@code disable_notification}。
+     *
+     * <p>刻意只映射 {@code silent} 这一个维度：{@code ephemeral}（Telegram 临时消息，库已支持
+     * {@code ephemeralMessageParameters}）当前没有使用场景——本项目的通知事件全是 PERMANENT
+     * 策略，映射它属于无人调用的代码。要用时再加，并同批补测试。
+     */
+    @Override
+    public void sendText(long chatId, String text, NoticePolicy policy) {
+        if (policy == null) {
+            throw new TggException("回复出口：通知策略不可为空（chat=" + chatId + "）");
+        }
+        try {
+            client.execute(SendMessage.builder()
+                    .chatId(Long.toString(chatId))
+                    .text(text)
+                    .disableNotification(policy.silent())
+                    .build());
         } catch (TelegramApiException ex) {
             throw new TggException("回复出口：发送文本失败（chat=" + chatId + "）", ex);
         }

@@ -24,6 +24,7 @@
 package com.tg.escrow;
 
 import com.tg.escrow.common.TggException;
+import com.tg.escrow.core.NoticePolicy;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -137,5 +138,33 @@ class TelegramBotReplyAdapterTest {
     void ctorRejectsNull() {
         assertThatThrownBy(() -> new TelegramBotReplyAdapter(null))
                 .isInstanceOf(TggException.class);
+    }
+
+    @Test
+    @DisplayName("sendText(policy)：silent 策略 → disableNotification=true（关响铃、不动送达）")
+    void silentPolicyDisablesNotification() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        adapter.sendText(123456L, "对方已交付，待你验收", NoticePolicy.progress());
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(client).execute(captor.capture());
+        assertThat(captor.getValue().getChatId()).isEqualTo("123456");
+        assertThat(captor.getValue().getText()).isEqualTo("对方已交付，待你验收");
+        assertThat(captor.getValue().getDisableNotification()).isTrue();
+    }
+
+    @Test
+    @DisplayName("sendText(policy)：critical 策略 → disableNotification=false（资金节点必须响铃）")
+    void criticalPolicyKeepsNotification() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        adapter.sendText(123456L, "资金已锁定", NoticePolicy.critical());
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(client).execute(captor.capture());
+        assertThat(captor.getValue().getDisableNotification()).isFalse();
     }
 }

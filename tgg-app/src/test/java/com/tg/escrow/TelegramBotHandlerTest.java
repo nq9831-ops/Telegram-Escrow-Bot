@@ -88,6 +88,9 @@ class TelegramBotHandlerTest {
         /** 每次带按钮的发送记一条 "text|url"。 */
         final List<String> webAppSends = new ArrayList<>();
 
+        /** 带通知策略的发送：记 "chatId|silent|loud|text"——便于断言「发给谁 + 是否静默」。 */
+        final List<String> policySends = new ArrayList<>();
+
         @Override
         public void sendText(long chatId, String text) {
             texts.add(text);
@@ -96,6 +99,11 @@ class TelegramBotHandlerTest {
         @Override
         public void sendTextWithWebApp(long chatId, String text, String buttonText, String url) {
             webAppSends.add(text + "|" + url);
+        }
+
+        @Override
+        public void sendText(long chatId, String text, com.tg.escrow.core.NoticePolicy policy) {
+            policySends.add(chatId + "|" + (policy.silent() ? "silent" : "loud") + "|" + text);
         }
 
         @Override

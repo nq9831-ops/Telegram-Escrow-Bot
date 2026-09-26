@@ -23,6 +23,8 @@
  */
 package com.tg.escrow;
 
+import com.tg.escrow.core.NoticePolicy;
+
 /**
  * 回复出口（S1）：把回执交回 Telegram 的最小契约。
  *
@@ -33,6 +35,17 @@ public interface BotReplyPort {
 
     /** 发送文本回执。 */
     void sendText(long chatId, String text);
+
+    /**
+     * 发送文本回执，并声明这条消息的通知策略（GM-36）。
+     *
+     * <p>与 {@link #sendText(long, String)} 的唯一区别：把 {@link NoticePolicy#silent()}
+     * 落到 Telegram 的 {@code disable_notification}。<b>它只影响响铃、不影响送达</b>——
+     * 静默不等于消息丢失；这也正是"静默时段"敢压制非关键通知的前提。
+     *
+     * @param policy 通知策略（不可为空——不静默降级到某个默认策略）
+     */
+    void sendText(long chatId, String text, NoticePolicy policy);
 
     /**
      * 发送带「打开表单」按钮的文本回执（S6 / Wave 3）。
