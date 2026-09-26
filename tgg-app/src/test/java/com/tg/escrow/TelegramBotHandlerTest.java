@@ -186,6 +186,16 @@ class TelegramBotHandlerTest {
     private static TelegramBotHandler handler(RecordingReply reply, InMemoryStore store, String webAppUrl,
                                               com.tg.escrow.core.ProtectionMode protection,
                                               RecordingAdmin admin) {
+        return handler(reply, store, webAppUrl, protection, admin,
+                com.tg.escrow.core.JoinBurstGuard.disabled(protection,
+                        Clock.fixed(T0, ZoneOffset.UTC)));
+    }
+
+    /** 变体：允许指定入群爆发保护（验收「连续拉人会触发保护」需要它）。 */
+    private static TelegramBotHandler handler(RecordingReply reply, InMemoryStore store, String webAppUrl,
+                                              com.tg.escrow.core.ProtectionMode protection,
+                                              RecordingAdmin admin,
+                                              com.tg.escrow.core.JoinBurstGuard burstGuard) {
         Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
         TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
         TradeHistoryPort history = id -> new TradeAdmissionContext(id, 0, null, false);
@@ -292,7 +302,7 @@ class TelegramBotHandlerTest {
                                 new com.tg.escrow.core.WelcomeTemplate("欢迎 {username}"), admin),
                         // 必订频道留空：本类测的是入群文案与保护模式，订阅门禁由 JoinSubscriptionGateTest 覆盖
                         java.util.Set.of(),
-                        com.tg.escrow.core.JoinBurstGuard.disabled(protection, clock)));
+                        burstGuard));
     }
 
     private static Update textUpdate(long chatId, long userId, String text) {
@@ -494,6 +504,27 @@ class TelegramBotHandlerTest {
         public void deleteMessage(long guildId, long messageId) {
             throw new UnsupportedOperationException("本类不测删消息");
         }
+    }
+
+    @Test
+    @DisplayName("【验收】连续拉人触发爆发保护 → 后来者被移出（此前保护模式在运行期根本走不到）")
+    void acceptanceJoinBurstProtectsGroup() {
+        RecordingReply reply = new RecordingReply();
+        RecordingAdmin admin = new RecordingAdmin();
+        com.tg.escrow.core.ProtectionMode protection = new com.tg.escrow.core.ProtectionMode();
+        com.tg.escrow.core.JoinBurstGuard burst = new com.tg.escrow.core.JoinBurstGuard(
+                java.time.Duration.ofMinutes(1), 1, java.time.Duration.ofMinutes(10), protection,
+                Clock.fixed(T0, ZoneOffset.UTC));
+        TelegramBotHandler h = handler(reply, new InMemoryStore(), WEBAPP_URL, protection, admin, burst);
+
+        h.consume(memberJoinUpdate(100L, 7771L, "甲"));   // 第 1 人：未超上限
+        h.consume(memberJoinUpdate(100L, 7772L, "乙"));   // 第 2 人：爆发 → 保护开启 → 被移出
+
+        assertThat(protection.shouldRejectJoin())
+                .as("此前 ProtectionMode 在运行期无法被触发——本断言正是那条链路的证据")
+                .isTrue();
+        assertThat(admin.kicked).as("后来者应被移出").containsExactly(7772L);
+        assertThat(reply.texts.get(reply.texts.size() - 1)).contains("保护模式");
     }
 
     @Test
