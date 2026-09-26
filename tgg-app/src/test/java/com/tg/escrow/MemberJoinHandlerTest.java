@@ -49,8 +49,41 @@ class MemberJoinHandlerTest {
         return new MemberJoined(CHAT, "担保交易群", 4242L, userName);
     }
 
+    /** 记录踢人调用；{@code failKick} 置位则抛（模拟操作失败）。 */
+    private static final class RecordingAdmin implements com.tg.escrow.core.GroupAdminPort {
+        final java.util.List<Long> kicked = new java.util.ArrayList<>();
+        boolean failKick;
+
+        @Override
+        public void kick(long guildId, long userId) {
+            if (failKick) {
+                throw new TggException("模拟踢人失败");
+            }
+            kicked.add(userId);
+        }
+
+        @Override
+        public void ban(long guildId, long userId) {
+            throw new UnsupportedOperationException("本类不测封禁");
+        }
+
+        @Override
+        public void mute(long guildId, long userId, java.time.Duration duration) {
+            throw new UnsupportedOperationException("本类不测禁言");
+        }
+
+        @Override
+        public void deleteMessage(long guildId, long messageId) {
+            throw new UnsupportedOperationException("本类不测删消息");
+        }
+    }
+
     private static MemberJoinHandler handler(ProtectionMode mode) {
-        return new MemberJoinHandler(mode, new WelcomeTemplate("欢迎 {username} 加入 {group}"));
+        return handler(mode, new RecordingAdmin());
+    }
+
+    private static MemberJoinHandler handler(ProtectionMode mode, RecordingAdmin admin) {
+        return new MemberJoinHandler(mode, new WelcomeTemplate("欢迎 {username} 加入 {group}"), admin);
     }
 
     @Test
@@ -62,17 +95,35 @@ class MemberJoinHandlerTest {
     }
 
     @Test
-    @DisplayName("保护模式开启 → 拦截，且【不发欢迎语】")
+    @DisplayName("保护模式开启 → 真的把人移出，且【不发欢迎语】（提示不能只是说说）")
     void rejectsWhenProtected() {
         ProtectionMode mode = new ProtectionMode();
         mode.enable("疑似批量拉人");
+        RecordingAdmin admin = new RecordingAdmin();
 
-        String out = handler(mode).onMemberJoined(joined("小明")).orElseThrow();
+        String out = handler(mode, admin).onMemberJoined(joined("小明")).orElseThrow();
 
+        assertThat(admin.kicked).as("提示写着『暂不接受新成员』，就必须真的执行").containsExactly(4242L);
         assertThat(out).contains("保护模式").contains("疑似批量拉人");
         assertThat(out)
                 .as("向一个本该被拦下的人说『欢迎』是自相矛盾的信号")
                 .doesNotContain("欢迎 小明");
+    }
+
+    @Test
+    @DisplayName("踢人失败 → 回执如实说失败，不得照发「暂不接受新成员」（那是谎报已拦截）")
+    void kickFailureIsReportedNotHidden() {
+        ProtectionMode mode = new ProtectionMode();
+        mode.enable("疑似批量拉人");
+        RecordingAdmin admin = new RecordingAdmin();
+        admin.failKick = true;
+
+        String out = handler(mode, admin).onMemberJoined(joined("小明")).orElseThrow();
+
+        assertThat(admin.kicked).isEmpty();
+        assertThat(out).as("拦截没成功就得说没成功，并请管理员处理").contains("失败");
+        assertThat(out).as("失败时不能只发『暂不接受』——那会让人以为人已被移出")
+                .doesNotContain("暂不接受新成员");
     }
 
     @Test
@@ -89,7 +140,8 @@ class MemberJoinHandlerTest {
     @DisplayName("显示名/群名缺失 → 不泄漏 {…} 原文（保守处理）")
     void missingNamesDoNotLeakPlaceholders() {
         MemberJoinHandler h = new MemberJoinHandler(
-                new ProtectionMode(), new WelcomeTemplate("欢迎 {username} 加入 {group}"));
+                new ProtectionMode(), new WelcomeTemplate("欢迎 {username} 加入 {group}"),
+                new RecordingAdmin());
         MemberJoined anonymous = new MemberJoined(CHAT, null, 4242L, null);
 
         String out = h.onMemberJoined(anonymous).orElseThrow();
@@ -100,9 +152,15 @@ class MemberJoinHandlerTest {
     @Test
     @DisplayName("构造/入参缺失 → 抛（fail-fast）")
     void failsClosed() {
-        assertThatThrownBy(() -> new MemberJoinHandler(null, new WelcomeTemplate("x")))
+        assertThatThrownBy(() -> new MemberJoinHandler(null, new WelcomeTemplate("x"),
+                new RecordingAdmin()))
                 .isInstanceOf(TggException.class);
-        assertThatThrownBy(() -> new MemberJoinHandler(new ProtectionMode(), null))
+        assertThatThrownBy(() -> new MemberJoinHandler(new ProtectionMode(), null,
+                new RecordingAdmin()))
+                .isInstanceOf(TggException.class);
+        assertThatThrownBy(() -> new MemberJoinHandler(new ProtectionMode(),
+                new WelcomeTemplate("x"), null))
+                .as("缺管理动作端口时不能静默降级成『只提示不踢』")
                 .isInstanceOf(TggException.class);
         assertThatThrownBy(() -> handler(new ProtectionMode()).onMemberJoined(null))
                 .isInstanceOf(TggException.class);

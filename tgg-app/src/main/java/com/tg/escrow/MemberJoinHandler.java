@@ -24,6 +24,7 @@
 package com.tg.escrow;
 
 import com.tg.escrow.common.TggException;
+import com.tg.escrow.core.GroupAdminPort;
 import com.tg.escrow.core.MemberJoined;
 import com.tg.escrow.core.ProtectionMode;
 import com.tg.escrow.core.WelcomeTemplate;
@@ -33,12 +34,16 @@ import java.util.Map;
 import java.util.Optional;
 
 /**
- * 新成员入群处理（Wave 2）——把 {@link ProtectionMode} 与 {@link WelcomeTemplate}
- * 这两个此前零生产消费者的类接上入群路径。
+ * 新成员入群处理——欢迎语渲染，以及保护模式的<b>实际拦截</b>。
  *
  * <h2>顺序：先判保护模式，再欢迎</h2>
  * <p>保护模式开启时<b>不发欢迎语</b>——向一个本该被拦下的人说"欢迎"是自相矛盾的信号，
  * 也让管理员看不出拦截是否生效。
+ *
+ * <h2>「拒绝」必须真的执行</h2>
+ * <p>本类最初只返回一句"暂不接受新成员"的文案、<b>不执行任何动作</b>：于是提示在说人被拒了，
+ * 人却还留在群里——一句做不到承诺的话。现接入 {@link GroupAdminPort#kick} 真正移出。
+ * 踢人失败时回执会<b>如实说失败</b>（而不是照发"暂不接受"，那会让人以为人已被移出）。
  *
  * <h2>变量的诚实处理</h2>
  * <p>显示名/群名缺失时传空串而不是 {@code null}：{@link WelcomeTemplate#render} 对缺失变量
@@ -49,13 +54,19 @@ public final class MemberJoinHandler {
 
     private final ProtectionMode protection;
     private final WelcomeTemplate welcome;
+    private final GroupAdminPort admin;
 
-    public MemberJoinHandler(ProtectionMode protection, WelcomeTemplate welcome) {
+    public MemberJoinHandler(ProtectionMode protection, WelcomeTemplate welcome, GroupAdminPort admin) {
         if (protection == null || welcome == null) {
             throw new TggException("入群处理：保护模式与欢迎模板均不可为空");
         }
+        if (admin == null) {
+            throw new TggException("入群处理：管理动作端口不可为空"
+                    + "（缺它则保护模式只能提示、无法真正拦截）");
+        }
         this.protection = protection;
         this.welcome = welcome;
+        this.admin = admin;
     }
 
     /**
@@ -69,6 +80,10 @@ public final class MemberJoinHandler {
             throw new TggException("入群处理：事件不可为空");
         }
         if (protection.shouldRejectJoin()) {
+            if (!attemptKick(admin, joined.chatId(), joined.userId())) {
+                return Optional.of("⚠️ 本群正处于保护模式，但移出新成员失败（操作未成功），"
+                        + "请管理员手动处理。");
+            }
             String reason = protection.reason();
             return Optional.of("⚠️ 本群正处于保护模式" + (reason == null || reason.isBlank()
                     ? "" : "（" + reason + "）") + "，暂不接受新成员。请管理员确认情况后关闭保护模式。");
@@ -77,5 +92,24 @@ public final class MemberJoinHandler {
         vars.put("username", joined.userName() == null ? "" : joined.userName());
         vars.put("group", joined.chatTitle() == null ? "" : joined.chatTitle());
         return Optional.of(welcome.render(vars));
+    }
+
+    /**
+     * 尝试移出成员。
+     *
+     * <p>失败<b>不抛</b>（调用方还要把回执发出去，异常逃逸会让提示一起丢掉），但必须留痕——
+     * 静默失败会把"已拦截"变成谎报。返回值供调用方决定回执该怎么说。
+     *
+     * @return 操作成功为 {@code true}
+     */
+    static boolean attemptKick(GroupAdminPort admin, long chatId, long userId) {
+        try {
+            admin.kick(chatId, userId);
+            return true;
+        } catch (RuntimeException ex) {
+            System.err.println("入群处理：移出成员失败（chat=" + chatId + " user=" + userId
+                    + "）：" + ex.getMessage());
+            return false;
+        }
     }
 }

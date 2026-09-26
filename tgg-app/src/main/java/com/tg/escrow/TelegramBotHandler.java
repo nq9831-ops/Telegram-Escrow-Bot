@@ -183,6 +183,10 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
     private void handleMemberJoin(Message message) {
         String title = message.getChat() == null ? null : message.getChat().getTitle();
         for (User newMember : message.getNewChatMembers()) {
+            if (newMember == null) {
+                // 畸形输入：一条 null 就能让整个入群事件 NPE 逃逸（并带走其余成员的欢迎语）
+                continue;
+            }
             if (Boolean.TRUE.equals(newMember.getIsBot())) {
                 continue;   // bot 自己入群也会出现在此列表，不必自我欢迎
             }

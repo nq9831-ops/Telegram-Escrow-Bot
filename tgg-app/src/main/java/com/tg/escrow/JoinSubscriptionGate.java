@@ -83,6 +83,9 @@ public final class JoinSubscriptionGate {
         this.admin = admin;
         this.inner = inner;
         this.requiredChannels = Set.copyOf(requiredChannels);
+        // 配置自检：必订频道不在白名单时 passes 会抛——在此触发即「启动期 fail-fast」，
+        // 而不是等第一个用户入群才在日志里淹掉（那会让群治理静默失效）。
+        check.passes(Set.of(), this.requiredChannels);
     }
 
     /**
@@ -113,20 +116,17 @@ public final class JoinSubscriptionGate {
             return Optional.of("⚠️ 暂时无法确认你的频道订阅状态，请稍后再试或联系管理员。");
         }
 
-        boolean passed;
-        try {
-            passed = check.passes(subscribed, requiredChannels);
-        } catch (TggException ex) {
-            System.err.println("入群订阅门卫：群 " + joined.chatId() + " 的必订频道配置有误——"
-                    + ex.getMessage());
-            return Optional.of("⚠️ 本群的频道订阅配置有误，暂时无法完成验证，请联系管理员。");
-        }
-
-        if (passed) {
+        // 必订频道非空且均可判定：此时 passes 不会因配置错而抛（配置错已在构造期被挡下）
+        if (check.passes(subscribed, requiredChannels)) {
             return inner.onMemberJoined(joined);
         }
 
-        admin.kick(joined.chatId(), joined.userId());
-        return Optional.of("请先订阅 " + String.join("、", requiredChannels) + " 后再加入本群。");
+        // 未订阅：真正移出。回执的受众是**留在群里的其他人/管理员**——被移出者看不到它
+        // （Telegram 另有移除提示给他），所以措辞按"群视角"写，不写成对被移出者说话。
+        if (!MemberJoinHandler.attemptKick(admin, joined.chatId(), joined.userId())) {
+            return Optional.of("⚠️ 未能移出未订阅 " + String.join("、", requiredChannels)
+                    + " 的新成员（操作失败），请管理员手动处理。");
+        }
+        return Optional.of("⚠️ 新成员因未订阅 " + String.join("、", requiredChannels) + " 已被移出。");
     }
 }

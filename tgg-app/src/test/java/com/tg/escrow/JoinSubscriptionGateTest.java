@@ -37,6 +37,7 @@ import java.util.Set;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -57,7 +58,8 @@ class JoinSubscriptionGateTest {
     private static final MemberJoined JOINED = new MemberJoined(CHAT, "测试群", USER, "小明");
 
     private static MemberJoinHandler inner() {
-        return new MemberJoinHandler(new ProtectionMode(), new WelcomeTemplate("欢迎 {username} 加入"));
+        return new MemberJoinHandler(new ProtectionMode(), new WelcomeTemplate("欢迎 {username} 加入"),
+                mock(GroupAdminPort.class));
     }
 
     private static JoinSubscriptionGate gate(GroupAdminPort admin,
@@ -130,18 +132,27 @@ class JoinSubscriptionGateTest {
     }
 
     @Test
-    @DisplayName("配置错误（必订频道不在白名单）→ 不踢人：我们的配置错不能变成对用户的处罚")
-    void misconfiguredRequiredChannelDoesNotKick() {
-        GroupAdminPort admin = mock(GroupAdminPort.class);
-        JoinSubscriptionGate gate = new JoinSubscriptionGate(
+    @DisplayName("配置错误（必订频道不在白名单）→ 构造期即抛：配置错要在启动时爆，不能等第一个用户入群")
+    void misconfiguredRequiredChannelFailsAtConstruction() {
+        assertThatThrownBy(() -> new JoinSubscriptionGate(
                 new ChannelSubscriptionCheck(Set.of("@other")),   // 白名单不含 REQUIRED
                 (channel, userId) -> ChannelMembershipPort.Membership.SUBSCRIBED,
-                admin, inner(), Set.of(REQUIRED));
+                mock(GroupAdminPort.class), inner(), Set.of(REQUIRED)))
+                .as("配置错若只在入群时才被 System.err 吞掉，群治理会静默失效")
+                .isInstanceOf(com.tg.escrow.common.TggException.class);
+    }
+
+    @Test
+    @DisplayName("踢人失败 → 回执如实说失败（不得照发「已移出」——那是谎报）")
+    void kickFailureIsReported() {
+        GroupAdminPort admin = mock(GroupAdminPort.class);
+        org.mockito.Mockito.doThrow(new com.tg.escrow.common.TggException("模拟踢人失败"))
+                .when(admin).kick(CHAT, USER);
+        JoinSubscriptionGate gate = gate(admin, ChannelMembershipPort.Membership.NOT_SUBSCRIBED);
 
         Optional<String> out = gate.onMemberJoined(JOINED);
 
-        verify(admin, never()).kick(anyLong(), anyLong());
         assertThat(out).isPresent();
-        assertThat(out.get()).contains("配置");
+        assertThat(out.get()).as("拦不下来的要如实说").contains("失败");
     }
 }

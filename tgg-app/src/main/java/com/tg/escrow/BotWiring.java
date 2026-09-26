@@ -386,11 +386,12 @@ public class BotWiring {
         return mode;
     }
 
-    /** 入群处理（保护模式 → 欢迎或拦截）。 */
+    /** 入群处理（保护模式 → 拦截并移出；否则欢迎）。 */
     @Bean
     public MemberJoinHandler memberJoinHandler(com.tg.escrow.core.ProtectionMode protection,
-                                               com.tg.escrow.core.WelcomeTemplate welcome) {
-        return new MemberJoinHandler(protection, welcome);
+                                               com.tg.escrow.core.WelcomeTemplate welcome,
+                                               GroupAdminPort admin) {
+        return new MemberJoinHandler(protection, welcome, admin);
     }
 
     @Bean

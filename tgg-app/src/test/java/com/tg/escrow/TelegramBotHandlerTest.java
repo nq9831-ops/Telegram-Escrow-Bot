@@ -281,7 +281,26 @@ class TelegramBotHandlerTest {
                             }
                         },
                         new MemberJoinHandler(new com.tg.escrow.core.ProtectionMode(),
-                                new com.tg.escrow.core.WelcomeTemplate("欢迎 {username}")),
+                                new com.tg.escrow.core.WelcomeTemplate("欢迎 {username}"),
+                                com.tg.escrow.core.GroupAdminPort.class == null ? null
+                                        : new com.tg.escrow.core.GroupAdminPort() {
+                                            @Override
+                                            public void kick(long guildId, long userId) {
+                                            }
+
+                                            @Override
+                                            public void ban(long guildId, long userId) {
+                                            }
+
+                                            @Override
+                                            public void mute(long guildId, long userId,
+                                                             java.time.Duration duration) {
+                                            }
+
+                                            @Override
+                                            public void deleteMessage(long guildId, long messageId) {
+                                            }
+                                        }),
                         // 必订频道留空：本类测的是入群文案与保护模式，订阅门禁由 JoinSubscriptionGateTest 覆盖
                         java.util.Set.of()));
     }
@@ -435,6 +454,27 @@ class TelegramBotHandlerTest {
         message.setFrom(new User(4242L, "tester", false));
         message.setText("hi");
         return message;
+    }
+
+    @Test
+    @DisplayName("畸形输入：newChatMembers 混入 null → 不炸，且其余成员的欢迎语照发")
+    void nullNewMemberDoesNotBreakTheWholeEvent() {
+        RecordingReply reply = new RecordingReply();
+        TelegramBotHandler h = handler(reply, new InMemoryStore());
+        Message message = new Message();
+        message.setMessageId(9);
+        message.setChat(new Chat(100L, "supergroup"));
+        // 用 Arrays.asList（允许 null）而非 List.of（不允许）——本用例要构造的正是畸形输入
+        message.setNewChatMembers(java.util.Arrays.asList(null, new User(8888L, "小明", false)));
+        Update update = new Update();
+        update.setMessage(message);
+
+        h.consume(update);
+
+        assertThat(reply.texts)
+                .as("一条 null 不该让整个入群事件挂掉、连带丢掉其余成员的欢迎语")
+                .hasSize(1);
+        assertThat(reply.texts.get(0)).contains("小明");
     }
 
     // ── 入群事件（Wave 2）──────────────────────────────────────────────────
