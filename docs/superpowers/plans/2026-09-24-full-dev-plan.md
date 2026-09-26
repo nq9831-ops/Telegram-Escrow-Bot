@@ -1,5 +1,13 @@
 # 完整开发计划（基于 SPEC.md × 实测代码）
 
+> # ⛔ 本文档已被完全消耗，不要据此排期
+> 2026-09-25 判定（实测）：它的 **Wave 1b / 1c / 1d 所列 17 个类全部已存在**
+> （`TradeGroupLifecycle`/`VoterRegistry`/`VoteStake`/`MemberVote`/`FallbackSettle`/`VoteRewardAllocator`/
+> `EvidenceChannel`/`EvidenceDeadline`/`AmountTierPolicy`/`NewcomerBadge`/`CounterpartyDiversityScorer`/
+> `ChannelPuppetGuard`/`PhishingNotice`/`NoticePolicy`/`JoinOnboarding`/`AnomalyDetector` 等，已逐类 `find` 核实）；
+> 它列的 Wave 2（S1 Bot 接线）与 Wave 3（持久化）也已完成。
+> **新计划：[`2026-09-25-dev-plan.md`](2026-09-25-dev-plan.md)**（实测重建版）。
+
 > 制定日期：2026-09-24（天梁域）· 规划基准：`SPEC.md`（115 项）+ `docs/CODE-VS-SPEC.md`（31 项已落地实测）
 > 代码锚点已与现实核对：`tgg-escrow` 24 类在盘、Wave 1b 目标类全部不存在、`mvn test` 314 全绿（`9120f57`）。
 

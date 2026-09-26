@@ -1,5 +1,13 @@
 # 功能路线图（剩余功能 + 结构性缺口）
 
+> # ⛔ 本文档已失效，不要引用
+> 2026-09-25 判定（实测）：① 它用 **V2.0 的 G/T 编号**，与当前权威的 GM/ET 编号**不是一套**；
+> ② 它的基线 193 测试已远远过时（现为 805 用例 + 4 IT）；③ 它列的"结构性缺口 S1/S2"与
+> "可立刻开工波次 G-A/T-A/G-B"**全部已完成**。
+> **现状看 [`CODE-VS-SPEC.md`](CODE-VS-SPEC.md)，下一步看
+> [`superpowers/plans/2026-09-25-dev-plan.md`](superpowers/plans/2026-09-25-dev-plan.md)，
+> 文档导航见 [`INDEX.md`](INDEX.md)。** 本文档保留仅作历史溯源。
+
 > 归档时间：2026-09-23（2026-09-24 补注）· 基线：**193 项测试全绿**（tgg-core 71 / tgg-federation 13 /
 > tgg-escrow 97 / tgg-chain 12）
 >
