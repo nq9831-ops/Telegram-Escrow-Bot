@@ -46,7 +46,7 @@
 | GM-05 | 管理员配置（添加/移除） | B | `AdminRegistry` 存在但**零生产调用**；实际生效的是实时角色解析 `MemberRolePort`/`TelegramMemberRoleAdapter` |
 | GM-06 | 违禁词过滤 | A | `BannedWordMatcher` + `BannedWordStore` + `JpaModerationAdapters` + `AdminWordController`（在线管理入口） |
 | GM-07 | 反刷屏（Redis 滑动窗口） | C | `SlidingWindowCounter` + `RateLimiter`；**非 Redis**（进程内） |
-| GM-08 | 相同消息 3 次判定 | A | `MessageRepeatDetector`，经 `MessageGuardService` 挂入消息管道 |
+| GM-08 | 相同消息 3 次判定 | B | `MessageRepeatDetector` **仅被自己的测试引用**；`MessageGuardOrchestrator` 内也**没有**重复检测内联 → 该能力在生产管道中缺席（**更正**：本行初稿写"经 `MessageGuardService` 挂入管道"，未核实） |
 | GM-09 | 消息自动删除 | A | `GroupAdminPort.deleteMessage` + `MessageGuardOrchestrator` 的删除动作 |
 | GM-10 | 链接过滤（白名单+短链） | A | `LinkFilter` + `LinkMatch`（已修"空白名单误删带链接消息"） |
 | GM-11 | 媒体过滤（类型白名单） | A | `MediaFilter`（只对有 fileInfo 的消息判定） |
@@ -69,7 +69,7 @@
 | GM-28 | Bot 防拉群机制 | E | 未读到决定它的实现 |
 | GM-29 | 年龄确认（COPPA） | D | 未找到实现类（待决 B4） |
 | GM-30 | 未成年人保护 | D | 未找到实现类（待决 B4） |
-| GM-31 | 权限系统（角色+校验） | A | `PermissionChecker` + `PermissionPolicy` + `MemberRole` + `CommandActor` + `MemberRolePort`（实时解析 creator/administrator） |
+| GM-31 | 权限系统（角色+校验） | A | 能力已接线：`MemberRolePort`/`TelegramMemberRoleAdapter`（实时解析 creator/administrator）+ 命令层管理员校验 + `MemberRole`/`CommandActor`。**证据更正**：原引的 `PermissionChecker` 实测**零生产引用**（仅自己的测试），故不在生效链路里 |
 | GM-32 | 三级限流（用户/群组/全局） | C | `RateLimiter` + `RateLimitPolicy` + `RateLimitDecision`；接入深度未核实 |
 | GM-33 | 日志脱敏（Token + 用户 ID） | B | `LogSanitizer` **带盐方法已实现**（`maskUserId(long, String salt)` 盐必填 + 48 bit；旧无盐重载仅向后兼容）——但**生产侧无任何调用方**（实测 `grep 'maskUserId('` main 为空），即"有件未接"。**更正**：本行初稿沿用 SPEC 6.2 的"未加盐"说法而**未读源码**，实测已加盐（见 §5） |
 | GM-34 | 数据备份（MySQL + Redis） | D | 未找到实现类（属运维动作） |
@@ -95,7 +95,7 @@
 | ET-13 | 超时自动处理 | C | `TradeTimeoutPolicy`（惰性判定，无调度器；"自动"限于命令触发时结算） |
 | ET-14 | 争议发起与冻结 | A | `DisputeFlow` |
 | ET-15 | 多签仲裁（2/3 必含联邦） | C | `EscrowMultiSigRule` + `PartySignatureVerifier` + `FederationPartySignatureVerifier`（Java 侧；**链上未落，语义注意 SPEC 6.4**） |
-| ET-16 | 多签规则校验 | A | `EscrowVerdictGuard` + `EscrowVerdict` |
+| ET-16 | 多签规则校验 | B | `EscrowVerdictGuard` **仅出现在测试**（`EscrowVerdictGuardTest`、`FederationPartySignatureVerifierTest`）→ 有件未接（`EscrowVerdict` 另有 2 处引用） |
 | ET-17 | 证据提交（IPFS） | C | `DeliveryProofSubmission` + `EvidenceHasher`；**IPFS 未接** |
 | ET-18 | 交易评价（双方互评） | A | `TradeReview` + `TradeReviewService` + `JpaTradeReviewStore`（本会话修过 `@Transactional` 装配缺陷） |
 | ET-19 | 链上事件监听 | C | `BalanceCrossVerifier` + `ChainSource`；**无真实链上源** |
@@ -128,7 +128,7 @@
 | ET-46 | 仲裁员加入费动态门槛 | C | `StakeThresholdAdjuster` + `VoteStake` |
 | ET-47 | 投票截止后 FallbackSettle 兜底 | C | `FallbackSettle` |
 | ET-48 | 重放保护（seqno/nonce） | B | `ReplayGuard` 零生产调用（**缺 nonce 源**：唯一签名面 `initData` 在同一会话内被重复携带，按 nonce 拒会打断正常使用） |
-| ET-49 | 交易阶段标注 | A | `TradeStage` |
+| ET-49 | 交易阶段标注 | B | `TradeStage` **仅被自己的测试引用**（`TradeStageTest`），main 侧零引用、无注解装配 → **有件未接** |
 | ET-50 | Fake Jetton 验证 | D | 未找到实现类（合约侧） |
 | ET-51 | 链上存证 | C | `EvidenceHasher`；链上未接 |
 | ET-52 | x402 Proof Hash | C | 概念落在 `deliveryProofHash`（不绑 x402，见 SPEC 6.5） |
@@ -163,8 +163,8 @@
 
 | 判定 | 群管理 | 担保交易 | 合计 |
 |---|---|---|---|
-| **A｜已落地·已接线** | 13 | 17 | **30** |
-| **B｜已落地·未接线** | 5 | 1 | **6** |
+| **A｜已落地·已接线** | 12 | 15 | **27** |
+| **B｜已落地·未接线** | 6 | 3 | **9** |
 | **C｜部分实现** | 11 | 48 | **59** |
 | **D｜未找到实现类** | 5 | 10 | **15** |
 | **E｜未核实** | 2 | 2 | **4** |
@@ -204,7 +204,10 @@
 ## 4. 结论
 
 **一句**：逐项实测 114 行（GM 36 + ET 78；其中 GM-36 取 SPEC 6.6 节的定义，SPEC 状态表本身缺该行），
-**已落地 36 条（30 已接线 + 6 未接线）**、**部分实现 59 条**、未找到实现 15 条、未核实 4 条。
+**已落地 36 条（27 已接线 + 9 未接线）**、**部分实现 59 条**、未找到实现 15 条、未核实 4 条。
+
+> **审计后更正（2026-09-25）**：初稿的 A 级含 3 处误判（ET-49/GM-08/ET-16 的类只被自己的测试引用，
+> 生产零引用、无注解装配），已降为 B；GM-31 的 A 成立但证据引错了类。**详见 §6 文档审计记录**。
 与旧快照的"已落地 31 / 未做 84"相比，**不是功能变多了、而是判定标准变了**：旧版把"有类"就记 ✅（所以出现
 `SilenceWindow` 这类零引用孤儿被算作已完成），本版把"**是否接线、用户能否用到**"单独拆出来。
 
@@ -225,3 +228,29 @@
 
 **验证状态**：代码面 `mvn verify` 805 + 4 IT 全绿；**真机面未核销**（`docs/ONLINE-VERIFICATION.md` 的 A9/A10/A11，
 障碍是缺 `TELEGRAM_BOT_TOKEN`），因此"用户可用"目前**只有本地证据、没有真机证据**。
+
+## 6. 文档审计记录（2026-09-25）
+
+审这份文档自身的方法与结论：
+
+**审计方法**：抽出所有标 A/B 的行所引用的类（63 个），逐个实测**生产侧非注释引用数**
+（`grep -rn "\b<类>\b" --include=*.java tgg-*/src/main | grep -v "<类>.java:" | grep -vE ":[0-9]+: *(\*|//)"`），
+与行内判定对账。**可复算**——接手者请自行重跑，不要采信本节的结论。
+
+**方法学盲点（重要）**：引用数为 0 **不等于**未接线——`TradeInviteController`（`@RestController`，:64）、
+`AdminWordController`、`BotWiring`（`@Configuration`）都靠**注解**被 Spring 装配，文本引用为 0 是正常的。
+审计必须**先查注解**再定论。
+
+**审出的错误（已改正）**：
+| 行 | 原判定 | 实测 | 现判定 |
+|---|---|---|---|
+| ET-49 | A | `TradeStage` 仅被 `TradeStageTest` 引用，main 零引用、无注解 | **B** |
+| GM-08 | A | `MessageRepeatDetector` 仅被自己的测试引用；`MessageGuardOrchestrator` 内也无重复检测内联 | **B** |
+| ET-16 | A | `EscrowVerdictGuard` 仅出现在测试 | **B** |
+| GM-31 | A（证据引 `PermissionChecker`） | `PermissionChecker` 零生产引用；但能力在（`MemberRolePort` 11 引用 + 命令层管理员校验） | A（**证据已更正**） |
+
+**审计确认成立的部分**：五个 B 项（`AdminRegistry`/`ChannelPuppetGuard`/`FeatureToggle`/`JoinOnboarding`/`ReplayGuard`）
+与 `LogSanitizer` 实测均 0 引用且无注解 → B 判定成立。
+
+**局限**：本次只审了 A/B 两类（引用数是可机械核实的维度）；**C 级 59 行的"缺件"描述仍未经源码逐行回读**
+（本会话已发现其中 GM-33/ET-57 两行照抄 SPEC 结论而误判）。**C 级的可信度低于 A/B。**
