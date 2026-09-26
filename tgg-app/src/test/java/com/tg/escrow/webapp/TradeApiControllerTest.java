@@ -121,8 +121,15 @@ class TradeApiControllerTest {
             sent.add(chatId + "|" + text);
         }
 
+        /** 一次性开关：置位后下一次发送失败（模拟对方未与机器人会话 / 被拉黑）。 */
+        boolean failNextSend;
+
         @Override
         public void sendText(long chatId, String text, com.tg.escrow.core.NoticePolicy policy) {
+            if (failNextSend) {
+                failNextSend = false;
+                throw new com.tg.escrow.common.TggException("模拟发送失败");
+            }
             sent.add(chatId + "|" + text);
         }
 
@@ -148,6 +155,20 @@ class TradeApiControllerTest {
 
         assertThat(body).containsEntry("ok", true).containsEntry("notified", true);
         assertThat(notifications.sent).anySatisfy(s -> assertThat(s).startsWith("2002|"));
+    }
+
+    @Test
+    @DisplayName("通知发不出去 → 落单仍成功，但 notified=false（不谎报已通知对方）")
+    void reportsNotifiedFalseWhenCounterpartyUnreachable() {
+        InMemoryStore store = new InMemoryStore();
+        RecordingNotifications notifications = new RecordingNotifications();
+        notifications.failNextSend = true;
+
+        Map<String, Object> body = controller(store, notifications).create(
+                new TradeApiController.CreateRequest(initData(USER_ID), 2002L, "100", "USDT"));
+
+        assertThat(body).containsEntry("ok", true).containsEntry("notified", false);
+        assertThat(notifications.sent).as("发送失败时不该留下任何已发送记录").isEmpty();
     }
 
     private static TradeApiController controller(InMemoryStore store) {

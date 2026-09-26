@@ -133,7 +133,9 @@ public class TradeInviteController {
      * 接受一条邀请（令牌取自已验签的 {@code start_param}）→ 物化订单。
      *
      * @param req 载荷（仅 {@code initData}；令牌在签名串里，无需也不应单独传）
-     * @return {@code {ok:true, orderId, amount, currency}} 或 {@code {ok:false, status, error}}
+     * @return {@code {ok:true, orderId, notified, amount, currency}} 或 {@code {ok:false, status, error}}
+     *         ——{@code notified} 表示「已把这次接单告知发起方（买方）」；对方未与机器人会话过时为
+     *         {@code false}（接单本身仍成功）
      */
     @PostMapping("/accept")
     public Map<String, Object> accept(@RequestBody AcceptRequest req) {

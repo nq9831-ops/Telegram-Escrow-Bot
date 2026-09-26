@@ -157,8 +157,15 @@ class TradeInviteControllerTest {
             sent.add(chatId + "|" + text);
         }
 
+        /** 一次性开关：置位后下一次发送失败（模拟对方未与机器人会话 / 被拉黑）。 */
+        boolean failNextSend;
+
         @Override
         public void sendText(long chatId, String text, com.tg.escrow.core.NoticePolicy policy) {
+            if (failNextSend) {
+                failNextSend = false;
+                throw new com.tg.escrow.common.TggException("模拟发送失败");
+            }
             sent.add(chatId + "|" + text);
         }
 
@@ -192,6 +199,26 @@ class TradeInviteControllerTest {
         assertThat(notifications.sent)
                 .as("发起方（买方）应收到通知")
                 .anySatisfy(s -> assertThat(s).startsWith(BUYER_ID + "|"));
+    }
+
+    @Test
+    @DisplayName("接单后通知发不出去 → 接单仍成功，但 notified=false（不谎报已通知发起方）")
+    void acceptReportsNotifiedFalseWhenInviterUnreachable() {
+        InMemoryInviteStore invites = new InMemoryInviteStore();
+        InMemoryOrderStore orders = new InMemoryOrderStore();
+        RecordingNotifications notifications = new RecordingNotifications();
+        TradeInviteController c = controller(invites, orders, cleanHistory(),
+                Clock.fixed(T0, ZoneOffset.UTC), notifications);
+        String token = (String) c.invite(
+                new TradeInviteController.InviteRequest(initData(BUYER_ID), "100", "USDT"))
+                .get("inviteToken");
+        notifications.failNextSend = true;
+
+        Map<String, Object> body = c.accept(
+                new TradeInviteController.AcceptRequest(initDataWithStartParam(ACCEPTOR_ID, token)));
+
+        assertThat(body).containsEntry("ok", true).containsEntry("notified", false);
+        assertThat(notifications.sent).as("发送失败时不该留下任何已发送记录").isEmpty();
     }
 
     private static TradeInviteController controller(InMemoryInviteStore invites, InMemoryOrderStore orders,

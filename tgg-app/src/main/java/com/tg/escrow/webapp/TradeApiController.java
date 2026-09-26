@@ -100,7 +100,9 @@ public class TradeApiController {
      * 创建交易。
      *
      * @param req 表单载荷（{@code initData} 为 Telegram 签发的原始串）
-     * @return {@code {ok:true, orderId, riskPrompt}} 或 {@code {ok:false, status, error}}
+     * @return {@code {ok:true, orderId, notified, riskPrompt}} 或 {@code {ok:false, status, error}}
+     *         ——{@code notified} 表示「已把这次落单告知卖方」；对方未与机器人会话过时为 {@code false}
+     *         （落单本身仍成功，前端据此提示用户另行告知）
      */
     @PostMapping("/create")
     public Map<String, Object> create(@RequestBody CreateRequest req) {
