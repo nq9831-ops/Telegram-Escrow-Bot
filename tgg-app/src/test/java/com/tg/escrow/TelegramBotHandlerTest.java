@@ -178,6 +178,14 @@ class TelegramBotHandlerTest {
     }
 
     private static TelegramBotHandler handler(RecordingReply reply, InMemoryStore store, String webAppUrl) {
+        return handler(reply, store, webAppUrl, new com.tg.escrow.core.ProtectionMode(),
+                new RecordingAdmin());
+    }
+
+    /** 变体：允许指定保护模式与管理动作端口（验收「保护模式真的拦人」需要它们）。 */
+    private static TelegramBotHandler handler(RecordingReply reply, InMemoryStore store, String webAppUrl,
+                                              com.tg.escrow.core.ProtectionMode protection,
+                                              RecordingAdmin admin) {
         Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
         TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
         TradeHistoryPort history = id -> new TradeAdmissionContext(id, 0, null, false);
@@ -280,27 +288,8 @@ class TelegramBotHandlerTest {
                             public void deleteMessage(long guildId, long messageId) {
                             }
                         },
-                        new MemberJoinHandler(new com.tg.escrow.core.ProtectionMode(),
-                                new com.tg.escrow.core.WelcomeTemplate("欢迎 {username}"),
-                                com.tg.escrow.core.GroupAdminPort.class == null ? null
-                                        : new com.tg.escrow.core.GroupAdminPort() {
-                                            @Override
-                                            public void kick(long guildId, long userId) {
-                                            }
-
-                                            @Override
-                                            public void ban(long guildId, long userId) {
-                                            }
-
-                                            @Override
-                                            public void mute(long guildId, long userId,
-                                                             java.time.Duration duration) {
-                                            }
-
-                                            @Override
-                                            public void deleteMessage(long guildId, long messageId) {
-                                            }
-                                        }),
+                        new MemberJoinHandler(protection,
+                                new com.tg.escrow.core.WelcomeTemplate("欢迎 {username}"), admin),
                         // 必订频道留空：本类测的是入群文案与保护模式，订阅门禁由 JoinSubscriptionGateTest 覆盖
                         java.util.Set.of()));
     }
@@ -475,6 +464,55 @@ class TelegramBotHandlerTest {
                 .as("一条 null 不该让整个入群事件挂掉、连带丢掉其余成员的欢迎语")
                 .hasSize(1);
         assertThat(reply.texts.get(0)).contains("小明");
+    }
+
+    /** 记录管理动作；{@code failKick} 置位则抛（模拟操作失败）。 */
+    private static final class RecordingAdmin implements com.tg.escrow.core.GroupAdminPort {
+        final List<Long> kicked = new ArrayList<>();
+        boolean failKick;
+
+        @Override
+        public void kick(long guildId, long userId) {
+            if (failKick) {
+                throw new com.tg.escrow.common.TggException("模拟踢人失败");
+            }
+            kicked.add(userId);
+        }
+
+        @Override
+        public void ban(long guildId, long userId) {
+            throw new UnsupportedOperationException("本类不测封禁");
+        }
+
+        @Override
+        public void mute(long guildId, long userId, java.time.Duration duration) {
+            throw new UnsupportedOperationException("本类不测禁言");
+        }
+
+        @Override
+        public void deleteMessage(long guildId, long messageId) {
+            throw new UnsupportedOperationException("本类不测删消息");
+        }
+    }
+
+    @Test
+    @DisplayName("【验收】保护模式开启时拉人 → 该成员被真正移出，且群里不出现欢迎语")
+    void acceptanceProtectedJoinActuallyRemovesNewMember() {
+        RecordingReply reply = new RecordingReply();
+        RecordingAdmin admin = new RecordingAdmin();
+        com.tg.escrow.core.ProtectionMode protection = new com.tg.escrow.core.ProtectionMode();
+        protection.enable("疑似批量拉人");
+        TelegramBotHandler h = handler(reply, new InMemoryStore(), WEBAPP_URL, protection, admin);
+
+        h.consume(memberJoinUpdate(100L, 7777L, "小明"));
+
+        assertThat(admin.kicked)
+                .as("提示写着『暂不接受新成员』，就必须真的把 7777 移出——这是本任务的可观察结果")
+                .containsExactly(7777L);
+        assertThat(reply.texts)
+                .as("拦截生效时只发拦截说明，不发欢迎语")
+                .hasSize(1);
+        assertThat(reply.texts.get(0)).contains("保护模式").doesNotContain("欢迎");
     }
 
     // ── 入群事件（Wave 2）──────────────────────────────────────────────────
