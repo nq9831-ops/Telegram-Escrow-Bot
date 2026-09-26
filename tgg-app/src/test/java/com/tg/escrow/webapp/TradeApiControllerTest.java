@@ -23,6 +23,9 @@
  */
 package com.tg.escrow.webapp;
 
+import com.tg.escrow.BotReplyPort;
+import com.tg.escrow.TradeNotifier;
+
 import com.tg.escrow.TradeCommandHandler;
 import com.tg.escrow.core.MemberRole;
 import com.tg.escrow.escrow.AmountTierPolicy;
@@ -109,7 +112,50 @@ class TradeApiControllerTest {
         return String.join("&", fields) + "&hash=" + sign(String.join("\n", fields));
     }
 
+    /** 记录主动通知：{@code chatId|text}——用于断言"落单后告诉了谁"。 */
+    private static final class RecordingNotifications implements BotReplyPort {
+        final java.util.List<String> sent = new java.util.ArrayList<>();
+
+        @Override
+        public void sendText(long chatId, String text) {
+            sent.add(chatId + "|" + text);
+        }
+
+        @Override
+        public void sendText(long chatId, String text, com.tg.escrow.core.NoticePolicy policy) {
+            sent.add(chatId + "|" + text);
+        }
+
+        @Override
+        public void sendTextWithWebApp(long chatId, String text, String buttonText, String url) {
+            throw new UnsupportedOperationException("本类不测按钮消息");
+        }
+
+        @Override
+        public void ackCallback(String callbackQueryId) {
+            throw new UnsupportedOperationException("本类不测 callback 应答");
+        }
+    }
+
+    @Test
+    @DisplayName("落单后主动通知卖方，且响应回 notified=true（表单侧也能知道对方是否可达）")
+    void notifiesCounterpartyAndReportsIt() {
+        InMemoryStore store = new InMemoryStore();
+        RecordingNotifications notifications = new RecordingNotifications();
+
+        Map<String, Object> body = controller(store, notifications).create(
+                new TradeApiController.CreateRequest(initData(USER_ID), 2002L, "100", "USDT"));
+
+        assertThat(body).containsEntry("ok", true).containsEntry("notified", true);
+        assertThat(notifications.sent).anySatisfy(s -> assertThat(s).startsWith("2002|"));
+    }
+
     private static TradeApiController controller(InMemoryStore store) {
+        return controller(store, new RecordingNotifications());
+    }
+
+    private static TradeApiController controller(InMemoryStore store,
+                                                 RecordingNotifications notifications) {
         Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
         TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
         TradeHistoryPort history = id -> new TradeAdmissionContext(id, 0, null, false);
@@ -119,7 +165,8 @@ class TradeApiControllerTest {
         return new TradeApiController(
                 new WebAppInitDataVerifier(BOT_TOKEN, Duration.ofHours(1), clock),
                 service,
-                new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")));
+                new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
+                new TradeNotifier(notifications, clock, null));
     }
 
     @Test

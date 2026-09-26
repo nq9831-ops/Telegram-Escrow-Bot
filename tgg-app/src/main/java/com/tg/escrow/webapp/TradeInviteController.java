@@ -23,6 +23,10 @@
  */
 package com.tg.escrow.webapp;
 
+import com.tg.escrow.NotificationOutcome;
+import com.tg.escrow.TradeEvent;
+import com.tg.escrow.TradeNotifier;
+
 import com.tg.escrow.InviteLink;
 import com.tg.escrow.common.EscrowException;
 import com.tg.escrow.common.TggException;
@@ -65,16 +69,22 @@ public class TradeInviteController {
     private final TradeInviteService inviteService;
     private final AmountTierPolicy tierPolicy;
     private final InviteLink inviteLink;
+    private final TradeNotifier notifier;
 
     public TradeInviteController(WebAppInitDataVerifier verifier, TradeInviteService inviteService,
-                                 AmountTierPolicy tierPolicy, InviteLink inviteLink) {
+                                 AmountTierPolicy tierPolicy, InviteLink inviteLink,
+                                 TradeNotifier notifier) {
         if (verifier == null || inviteService == null || tierPolicy == null || inviteLink == null) {
             throw new TggException("邀请 API：验签器、邀请服务、金额分层策略与邀请链接构造器均不可为空");
+        }
+        if (notifier == null) {
+            throw new TggException("邀请 API：通知器不可为空");
         }
         this.verifier = verifier;
         this.inviteService = inviteService;
         this.tierPolicy = tierPolicy;
         this.inviteLink = inviteLink;
+        this.notifier = notifier;
     }
 
     /**
@@ -151,9 +161,12 @@ public class TradeInviteController {
             return fail(400, ex.getMessage());
         }
 
+        // 订单已物化，此时才通知发起方（买方）；发不出去也不影响接单结果
+        NotificationOutcome outcome = notifier.notify(order, who.get().userId(), TradeEvent.ACCEPTED);
         Map<String, Object> ok = new LinkedHashMap<>();
         ok.put("ok", true);
         ok.put("orderId", order.getId());
+        ok.put("notified", outcome == NotificationOutcome.SENT);
         ok.put("amount", order.getAmount().toPlainString());
         ok.put("currency", order.getCurrency());
         return ok;

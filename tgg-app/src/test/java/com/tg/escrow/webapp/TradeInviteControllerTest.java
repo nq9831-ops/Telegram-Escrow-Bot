@@ -23,6 +23,9 @@
  */
 package com.tg.escrow.webapp;
 
+import com.tg.escrow.BotReplyPort;
+import com.tg.escrow.TradeNotifier;
+
 import com.tg.escrow.InviteLink;
 import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowOrder;
@@ -145,8 +148,60 @@ class TradeInviteControllerTest {
 
     // ── 装配 ────────────────────────────────────────────────────────────
 
+    /** 记录主动通知：{@code chatId|text}。 */
+    private static final class RecordingNotifications implements BotReplyPort {
+        final java.util.List<String> sent = new java.util.ArrayList<>();
+
+        @Override
+        public void sendText(long chatId, String text) {
+            sent.add(chatId + "|" + text);
+        }
+
+        @Override
+        public void sendText(long chatId, String text, com.tg.escrow.core.NoticePolicy policy) {
+            sent.add(chatId + "|" + text);
+        }
+
+        @Override
+        public void sendTextWithWebApp(long chatId, String text, String buttonText, String url) {
+            throw new UnsupportedOperationException("本类不测按钮消息");
+        }
+
+        @Override
+        public void ackCallback(String callbackQueryId) {
+            throw new UnsupportedOperationException("本类不测 callback 应答");
+        }
+    }
+
+    @Test
+    @DisplayName("接单成功后主动通知发起方（买方），且响应回 notified=true")
+    void acceptNotifiesInviter() {
+        InMemoryInviteStore invites = new InMemoryInviteStore();
+        InMemoryOrderStore orders = new InMemoryOrderStore();
+        RecordingNotifications notifications = new RecordingNotifications();
+        TradeInviteController c = controller(invites, orders, cleanHistory(),
+                Clock.fixed(T0, ZoneOffset.UTC), notifications);
+        String token = (String) c.invite(
+                new TradeInviteController.InviteRequest(initData(BUYER_ID), "100", "USDT"))
+                .get("inviteToken");
+
+        Map<String, Object> body = c.accept(
+                new TradeInviteController.AcceptRequest(initDataWithStartParam(ACCEPTOR_ID, token)));
+
+        assertThat(body).containsEntry("ok", true).containsEntry("notified", true);
+        assertThat(notifications.sent)
+                .as("发起方（买方）应收到通知")
+                .anySatisfy(s -> assertThat(s).startsWith(BUYER_ID + "|"));
+    }
+
     private static TradeInviteController controller(InMemoryInviteStore invites, InMemoryOrderStore orders,
                                                     TradeHistoryPort history, Clock clock) {
+        return controller(invites, orders, history, clock, new RecordingNotifications());
+    }
+
+    private static TradeInviteController controller(InMemoryInviteStore invites, InMemoryOrderStore orders,
+                                                    TradeHistoryPort history, Clock clock,
+                                                    RecordingNotifications notifications) {
         TradeAdmissionGate gate = new TradeAdmissionGate(new TradeAdmissionPolicy(5, Duration.ZERO));
         AtomicInteger seq = new AtomicInteger();
         TradeInviteService svc = new TradeInviteService(gate, history, invites, orders, TTL,
@@ -154,7 +209,8 @@ class TradeInviteControllerTest {
         return new TradeInviteController(
                 new WebAppInitDataVerifier(BOT_TOKEN, Duration.ofHours(1), clock),
                 svc, new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
-                new InviteLink(BOT_USERNAME));
+                new InviteLink(BOT_USERNAME),
+                new TradeNotifier(notifications, clock, null));
     }
 
     private static TradeHistoryPort cleanHistory() {

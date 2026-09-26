@@ -23,6 +23,10 @@
  */
 package com.tg.escrow.webapp;
 
+import com.tg.escrow.NotificationOutcome;
+import com.tg.escrow.TradeEvent;
+import com.tg.escrow.TradeNotifier;
+
 import com.tg.escrow.common.EscrowException;
 import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.EscrowTradeService;
@@ -76,15 +80,20 @@ public class TradeApiController {
     private final WebAppInitDataVerifier verifier;
     private final EscrowTradeService service;
     private final AmountTierPolicy tierPolicy;
+    private final TradeNotifier notifier;
 
     public TradeApiController(WebAppInitDataVerifier verifier, EscrowTradeService service,
-                              AmountTierPolicy tierPolicy) {
+                              AmountTierPolicy tierPolicy, TradeNotifier notifier) {
         if (verifier == null || service == null || tierPolicy == null) {
             throw new TggException("交易 API：验签器、交易服务与金额分层策略均不可为空");
+        }
+        if (notifier == null) {
+            throw new TggException("交易 API：通知器不可为空");
         }
         this.verifier = verifier;
         this.service = service;
         this.tierPolicy = tierPolicy;
+        this.notifier = notifier;
     }
 
     /**
@@ -123,9 +132,13 @@ public class TradeApiController {
         }
 
         if (result.status() == TradeInitiationResult.Status.CREATED) {
+            // 落单已成功，此时才通知卖方；发不出去也不影响落单（notified=false 如实回报）
+            NotificationOutcome outcome = notifier.notify(result.order(), buyerId.get(),
+                    TradeEvent.CREATED);
             Map<String, Object> ok = new LinkedHashMap<>();
             ok.put("ok", true);
             ok.put("orderId", result.order().getId());
+            ok.put("notified", outcome == NotificationOutcome.SENT);
             // 风险提示随响应回传：前端在提交按钮上方常驻展示（ET-34 的单页形态）
             ok.put("riskPrompt", RiskPrompt.forAmount(request.amount(), tierPolicy));
             return ok;
