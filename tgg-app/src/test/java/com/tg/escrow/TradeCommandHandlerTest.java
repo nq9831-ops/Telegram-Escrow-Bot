@@ -410,7 +410,11 @@ class TradeCommandHandlerTest {
 
         String out = h.handle(statusCmd("1"), ACTOR);
 
-        assertThat(out).contains("#1").contains("订单已创建").contains("卖方确认接单");
+        assertThat(out).contains("#1").contains("订单已创建").contains("买方托管资金");
+        assertThat(out)
+                .as("OPEN 的提示不得指向做不到的命令：命令层没有『卖方接单』这条路"
+                        + "（/escrow confirm 是买方预览风险后的第二步，不是卖方动作）")
+                .doesNotContain("/escrow confirm");
     }
 
     @Test
@@ -592,7 +596,7 @@ class TradeCommandHandlerTest {
         String out = h.handle(lockCmd("1"), SELLER_ACTOR);   // 卖方不是买方
 
         assertThat(out).contains("无权");
-        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("等待卖方确认");
+        assertThat(h.handle(statusCmd("1"), ACTOR)).contains("等待买方托管资金");
     }
 
     @Test

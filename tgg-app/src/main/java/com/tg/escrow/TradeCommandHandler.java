@@ -441,7 +441,9 @@ public final class TradeCommandHandler {
      */
     private static String statusHint(long orderId, EscrowOrder.State state) {
         return switch (state) {
-            case OPEN -> "\n可用操作：/escrow confirm <卖方ID> <金额> <币种>（卖方接单）";
+            // 原先指向 /escrow confirm 是错的：那条命令是**买方预览后的第二步**（会另建新单），
+            // 卖方执行它接不了单。OPEN 的最初来源本就是买方自己的两步流，下一条真实可用的是买方托管。
+            case OPEN -> "\n可用操作：/escrow lock " + orderId + "（买方托管登记）";
             case CONFIRMED -> "\n可用操作：/escrow lock " + orderId + "（买方托管登记）";
             case LOCKED -> "\n可用操作：/escrow deliver " + orderId + "（卖方交付）、"
                     + "/escrow dispute " + orderId + " <理由>（发起争议）";

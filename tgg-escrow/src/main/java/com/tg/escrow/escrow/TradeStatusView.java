@@ -45,7 +45,10 @@ public record TradeStatusView(EscrowOrder.State state, String summary, String ne
             throw new EscrowException("交易状态视图：状态不可为空");
         }
         return switch (state) {
-            case OPEN -> new TradeStatusView(state, "订单已创建，等待卖方确认", "卖方确认接单");
+            // OPEN 只由命令层两步流产生（买方预览风险 → 确认落单），此后真正可走的下一步是**买方托管资金**
+            // （EscrowOrder.markLocked 允许 OPEN→LOCKED）。原文案写「等待卖方确认」/「卖方确认接单」，
+            // 指向一个命令层并不存在的节点——会指挥用户去做做不到的事。
+            case OPEN -> new TradeStatusView(state, "订单已创建，等待买方托管资金", "买方托管资金");
             case CONFIRMED -> new TradeStatusView(state, "卖方已确认，等待买方托管资金", "买方托管资金");
             case LOCKED -> new TradeStatusView(state, "资金已托管，等待卖方交付", "卖方交付");
             case DELIVERED -> new TradeStatusView(state, "卖方已交付，等待买方验收", "买方确认收货，或发起争议");

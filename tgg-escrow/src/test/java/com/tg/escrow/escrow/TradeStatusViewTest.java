@@ -52,7 +52,10 @@ class TradeStatusViewTest {
     @Test
     @DisplayName("放行中的状态，下一步指向仍可操作的一方")
     void activeStatesPointToNextActor() {
-        assertThat(TradeStatusView.of(State.OPEN).nextStep()).contains("卖方");
+        // OPEN 由命令层两步流产生（买方预览风险 → 确认落单），已实现的下一条路径是**买方直接托管**
+        // （EscrowOrder.markLocked 允许 OPEN→LOCKED；EscrowTradeService.lock 仅买方可用）。
+        // 「卖方确认接单」这一节点在命令层不存在——文案不得指向它，否则会指挥用户去做做不到的事。
+        assertThat(TradeStatusView.of(State.OPEN).nextStep()).contains("买方");
         assertThat(TradeStatusView.of(State.CONFIRMED).nextStep()).contains("买方");
         assertThat(TradeStatusView.of(State.LOCKED).nextStep()).contains("卖方");
         assertThat(TradeStatusView.of(State.DELIVERED).nextStep()).contains("买方");
