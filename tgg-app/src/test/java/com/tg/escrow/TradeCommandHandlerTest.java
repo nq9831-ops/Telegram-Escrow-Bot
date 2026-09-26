@@ -27,6 +27,7 @@ import com.tg.escrow.common.TggException;
 import com.tg.escrow.core.BotCommand;
 import com.tg.escrow.core.CommandActor;
 import com.tg.escrow.core.MemberRole;
+import com.tg.escrow.core.NoticePolicy;
 import com.tg.escrow.escrow.AmountTierPolicy;
 import com.tg.escrow.escrow.ConcurrentOrderUpdateException;
 import com.tg.escrow.escrow.EscrowOrder;
@@ -144,6 +145,44 @@ class TradeCommandHandlerTest {
         }
     }
 
+    /**
+     * 记录主动通知：{@code chatId|silent|loud|text}；{@code failNextSend} 为一次性开关
+     * （置位后只失败一次），便于断言"发不出去时回执如何表现"。
+     */
+    private static final class RecordingNotifications implements BotReplyPort {
+        final java.util.List<String> sent = new java.util.ArrayList<>();
+        boolean failNextSend;
+
+        @Override
+        public void sendText(long chatId, String text) {
+            sent.add(chatId + "|loud|" + text);
+        }
+
+        @Override
+        public void sendText(long chatId, String text, NoticePolicy policy) {
+            if (failNextSend) {
+                failNextSend = false;
+                throw new TggException("模拟发送失败（对方未与机器人会话 / 被拉黑）");
+            }
+            sent.add(chatId + "|" + (policy.silent() ? "silent" : "loud") + "|" + text);
+        }
+
+        @Override
+        public void sendTextWithWebApp(long chatId, String text, String buttonText, String url) {
+            throw new UnsupportedOperationException("本类不测按钮消息");
+        }
+
+        @Override
+        public void ackCallback(String callbackQueryId) {
+            throw new UnsupportedOperationException("本类不测 callback 应答");
+        }
+    }
+
+    /** 通知器：真实 TradeNotifier + 记录型出口（不 mock 中间层）。 */
+    private static TradeNotifier notifier(RecordingNotifications notifications) {
+        return new TradeNotifier(notifications, Clock.fixed(T0, ZoneOffset.UTC), null);
+    }
+
     private static BotCommand createCmd(String seller, String amount, String currency) {
         return new BotCommand("escrow", List.of("create", seller, amount, currency));
     }
@@ -160,8 +199,9 @@ class TradeCommandHandlerTest {
         return new BotCommand("escrow", List.of("cancel", orderId));
     }
 
-    /** 装配结果：handler + 其内部 store（并发冲突测试需要操纵 store）。 */
-    private record Wiring(TradeCommandHandler handler, InMemoryStore store) {
+    /** 装配结果：handler + 其内部 store（并发冲突测试需要操纵 store）+ 通知记录（通知断言需要）。 */
+    private record Wiring(TradeCommandHandler handler, InMemoryStore store,
+                          RecordingNotifications notifications) {
     }
 
     private static Wiring wiring(int maxConcurrent, Duration cooldown, TradeAdmissionContext ctx) {
@@ -171,6 +211,7 @@ class TradeCommandHandlerTest {
                 id, ctx.activeTradeCount(), ctx.lastCompletedTradeAt(), ctx.hasUnresolvedDispute());
         Clock clock = Clock.fixed(T0, ZoneOffset.UTC);
         InMemoryStore store = new InMemoryStore();
+        RecordingNotifications notifications = new RecordingNotifications();
         return new Wiring(new TradeCommandHandler(
                 new EscrowTradeService(gate, history, store, clock),
                 new AmountTierPolicy(new BigDecimal("100"), new BigDecimal("1000")),
@@ -179,7 +220,8 @@ class TradeCommandHandlerTest {
                 inviteService(gate, history, store, clock),
                 new InviteLink(BOT_USERNAME),
                 new TradeReviewService(new InMemoryReviewStore(), clock),
-                maintenanceService(clock)), store);
+                maintenanceService(clock),
+                notifier(notifications)), store, notifications);
     }
 
     /** 用真实 gate + 真实 service + 真实 registry 装配 handler。ctx 决定门禁看到的事实。 */
@@ -199,7 +241,8 @@ class TradeCommandHandlerTest {
                 inviteService(gate, history, store, clock),
                 new InviteLink(BOT_USERNAME),
                 new TradeReviewService(new InMemoryReviewStore(), clock),
-                maintenanceService(clock));
+                maintenanceService(clock),
+                notifier(new RecordingNotifications()));
     }
 
     /** 维护期服务：5 选项 + 默认第 3 项（24h）；超时规则与维护期时长同源。 */
@@ -722,5 +765,48 @@ class TradeCommandHandlerTest {
         assertThat(out)
                 .as("维护期超时不会自动放款——必须如实告知，别让用户以为到点钱会自己走")
                 .contains("不会自动执行");
+    }
+
+    // ── 对手方通知接线（Wave 3）：整链路真实依赖，不 mock 中间层 ──────────────
+
+    @Test
+    @DisplayName("【整链路】买方 lock 后卖方收到主动通知——不是只回了发起方")
+    void lockNotifiesCounterparty() {
+        Wiring w = wiring(5, Duration.ZERO, clean());
+        w.handler().handle(createCmd("2002", "100", "USDT"), ACTOR);
+        w.handler().handle(confirmCmd("2002", "100", "USDT"), ACTOR);
+        w.notifications().sent.clear();
+
+        w.handler().handle(lockCmd("1"), ACTOR);
+
+        assertThat(w.notifications().sent)
+                .as("卖方应收到通知（chatId = 卖方）")
+                .anySatisfy(s -> assertThat(s).startsWith(SELLER + "|"));
+    }
+
+    @Test
+    @DisplayName("通知发不出去 → 回执仍报成功，且追加「对方可能收不到」（不静默失败）")
+    void notificationFailureStillReportsSuccessWithHint() {
+        Wiring w = wiring(5, Duration.ZERO, clean());
+        w.handler().handle(createCmd("2002", "100", "USDT"), ACTOR);
+        w.handler().handle(confirmCmd("2002", "100", "USDT"), ACTOR);
+        w.notifications().failNextSend = true;   // 下一次（lock 的通知）失败
+
+        String out = w.handler().handle(lockCmd("1"), ACTOR);
+
+        assertThat(out).as("迁移已提交，回执必须报成功").contains("已锁仓");
+        assertThat(out).as("但要告诉发起方对方可能收不到，不能静默失败").contains("收不到");
+    }
+
+    @Test
+    @DisplayName("通知成功 → 回执不追加提示（不误报「对方收不到」）")
+    void successfulNotificationLeavesNoHint() {
+        Wiring w = wiring(5, Duration.ZERO, clean());
+        w.handler().handle(createCmd("2002", "100", "USDT"), ACTOR);
+        w.handler().handle(confirmCmd("2002", "100", "USDT"), ACTOR);
+
+        String out = w.handler().handle(lockCmd("1"), ACTOR);
+
+        assertThat(out).contains("已锁仓").doesNotContain("收不到");
     }
 }

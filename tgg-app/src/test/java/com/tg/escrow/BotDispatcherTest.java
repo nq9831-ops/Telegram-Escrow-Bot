@@ -115,7 +115,26 @@ class BotDispatcherTest {
                         return java.util.Set.of();
                     }
                 }, clock),
-                maintenanceService(clock));
+                maintenanceService(clock),
+                new TradeNotifier(new BotReplyPort() {
+                    @Override
+                    public void sendText(long chatId, String text) {
+                    }
+
+                    @Override
+                    public void sendText(long chatId, String text,
+                                         com.tg.escrow.core.NoticePolicy policy) {
+                    }
+
+                    @Override
+                    public void sendTextWithWebApp(long chatId, String text, String buttonText,
+                                                   String url) {
+                    }
+
+                    @Override
+                    public void ackCallback(String callbackQueryId) {
+                    }
+                }, clock, null));
     }
 
     /** 本类不测维护期——装配成形即可（5 选项 + 默认第 3 项）。 */

@@ -90,6 +90,15 @@ public final class TradeCommandHandler {
             "⚠️ 链上托管未接入（S5 合约）；当前仅为流程状态登记，不涉及真实转账。";
 
     /**
+     * 通知发不出去时追加给发起方的一句。
+     *
+     * <p>不静默失败：让发起方<b>误以为对方已收到</b>，是"主动通知"这个功能最容易造成的实质伤害
+     * （他会干等一个永远不来的回复）。但它只是回执上的一句话，不改变迁移结果。
+     */
+    public static final String UNREACHABLE_HINT =
+            "⚠️ 对方尚未与机器人开始对话，可能收不到通知，建议另行告知。";
+
+    /**
      * 用法说明文案（公开，供分发器判定"这条回执是用法说明"——从而在胶水层附上打开表单的按钮）。
      */
     public static final String USAGE = "用法：/escrow invite <金额> <币种> 生成邀请链接（对方点开即接单）；"
@@ -112,12 +121,14 @@ public final class TradeCommandHandler {
     private final InviteLink inviteLink;
     private final TradeReviewService reviewService;
     private final TradeMaintenanceService maintenanceService;
+    private final TradeNotifier notifier;
 
     public TradeCommandHandler(EscrowTradeService service, AmountTierPolicy tierPolicy,
                                PendingTradeRegistry pending, EscrowOrderLookupPort lookup,
                                TradeInviteService inviteService, InviteLink inviteLink,
                                TradeReviewService reviewService,
-                               TradeMaintenanceService maintenanceService) {
+                               TradeMaintenanceService maintenanceService,
+                               TradeNotifier notifier) {
         if (service == null || tierPolicy == null || pending == null || lookup == null) {
             throw new TggException("命令处理：交易服务、金额分层策略、待确认登记与订单查询端口均不可为空");
         }
@@ -130,6 +141,9 @@ public final class TradeCommandHandler {
         if (maintenanceService == null) {
             throw new TggException("命令处理：维护期服务不可为空");
         }
+        if (notifier == null) {
+            throw new TggException("命令处理：通知器不可为空");
+        }
         this.service = service;
         this.tierPolicy = tierPolicy;
         this.pending = pending;
@@ -138,6 +152,7 @@ public final class TradeCommandHandler {
         this.inviteLink = inviteLink;
         this.reviewService = reviewService;
         this.maintenanceService = maintenanceService;
+        this.notifier = notifier;
     }
 
     /** 本处理器是否管辖该命令。 */
@@ -175,24 +190,29 @@ public final class TradeCommandHandler {
         }
 
         if (SUB_LOCK.equals(sub)) {
-            return advance(cmd, actor, order -> service.lock(order, actor.userId()), "托管", true);
+            return advance(cmd, actor, order -> service.lock(order, actor.userId()),
+                    "托管", true, TradeEvent.LOCKED);
         }
         if (SUB_DELIVER.equals(sub)) {
-            return advance(cmd, actor, order -> service.deliver(order, actor.userId()), "交付", false);
+            return advance(cmd, actor, order -> service.deliver(order, actor.userId()),
+                    "交付", false, TradeEvent.DELIVERED);
         }
         if (SUB_RELEASE.equals(sub)) {
-            return advance(cmd, actor, order -> service.release(order, actor.userId()), "验收放款", true);
+            return advance(cmd, actor, order -> service.release(order, actor.userId()),
+                    "验收放款", true, TradeEvent.RELEASED);
         }
         if (SUB_REFUND.equals(sub)) {
             String reason = cmd.argOpt(2).orElse("当事人协商退款");
-            return advance(cmd, actor, order -> service.refund(order, actor.userId(), reason), "退款", true);
+            return advance(cmd, actor, order -> service.refund(order, actor.userId(), reason),
+                    "退款", true, TradeEvent.REFUNDED);
         }
         if (SUB_DISPUTE.equals(sub)) {
             String reason = cmd.argOpt(2).orElse(null);
             if (reason == null || reason.isBlank()) {
                 return USAGE;
             }
-            return advance(cmd, actor, order -> service.dispute(order, actor.userId(), reason), "争议", false);
+            return advance(cmd, actor, order -> service.dispute(order, actor.userId(), reason),
+                    "争议", false, TradeEvent.DISPUTED);
         }
 
         if (SUB_REVIEW.equals(sub)) {
@@ -240,7 +260,9 @@ public final class TradeCommandHandler {
         }
 
         if (result.status() == TradeInitiationResult.Status.CREATED) {
-            return "已创建订单 #" + result.order().getId();
+            NotificationOutcome outcome = notifier.notify(result.order(), actor.userId(),
+                    TradeEvent.CREATED);
+            return "已创建订单 #" + result.order().getId() + unreachableHint(outcome);
         }
 
         TradeAdmissionDecision decision = result.decision();
@@ -311,9 +333,10 @@ public final class TradeCommandHandler {
      * 解析订单号 → 查单 → 交给服务层（权限与状态守卫都在那里）→ 统一回执。
      *
      * @param fundImplying 该迁移是否涉及资金语义——是则在回执尾部附上「链上未接入」标注
+     * @param event        该迁移对应的通知事件（迁移<b>成功后</b>据此告知对手方）
      */
     private String advance(BotCommand cmd, CommandActor actor, OrderStep step,
-                           String action, boolean fundImplying) {
+                           String action, boolean fundImplying, TradeEvent event) {
         Long orderId = parseLong(cmd.argOpt(1).orElse(null));
         if (orderId == null) {
             return USAGE;
@@ -329,7 +352,9 @@ public final class TradeCommandHandler {
         } catch (EscrowException ex) {
             return "无法" + action + "：" + ex.getMessage();
         }
-        String tail = fundImplying ? "\n" + CHAIN_CAVEAT : "";
+        // 迁移已提交，此时才通知——通知失败绝不改变上面已落库的结果（见 UNREACHABLE_HINT）
+        NotificationOutcome outcome = notifier.notify(order, actor.userId(), event);
+        String tail = (fundImplying ? "\n" + CHAIN_CAVEAT : "") + unreachableHint(outcome);
         return "订单 #" + orderId + " 已" + actionSucceeded(action) + "。" + tail;
     }
 
@@ -337,6 +362,12 @@ public final class TradeCommandHandler {
     @FunctionalInterface
     private interface OrderStep {
         Object run(EscrowOrder order);
+    }
+
+    /** 通知未送达时追加给发起方的那一句；送达则什么都不加（不误报）。 */
+    private static String unreachableHint(NotificationOutcome outcome) {
+        return outcome == NotificationOutcome.RECIPIENT_UNREACHABLE
+                ? "\n" + UNREACHABLE_HINT : "";
     }
 
     /** 动作 → 成功回执措辞（不把服务层返回值当展示形态）。 */
@@ -455,7 +486,8 @@ public final class TradeCommandHandler {
         } catch (EscrowException ex) {
             return "无法取消：" + ex.getMessage();
         }
-        return "订单 #" + orderId + " 已取消";
+        NotificationOutcome outcome = notifier.notify(order, actor.userId(), TradeEvent.CANCELLED);
+        return "订单 #" + orderId + " 已取消" + unreachableHint(outcome);
     }
 
     private static String reasonText(TradeAdmissionDecision.Reason reason) {

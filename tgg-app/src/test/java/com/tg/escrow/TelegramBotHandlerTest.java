@@ -190,7 +190,8 @@ class TelegramBotHandlerTest {
                         Duration.ofHours(24), () -> "tok0", clock),
                 new InviteLink("mybot"),
                 noopReviewService(clock),
-                maintenanceService(clock));
+                maintenanceService(clock),
+                new TradeNotifier(reply, clock, null));
         ModerationOrchestrator orch = new ModerationOrchestrator(new com.tg.escrow.core.GroupAdminPort() {
             @Override
             public void kick(long guildId, long userId) {

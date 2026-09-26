@@ -226,9 +226,10 @@ public class BotWiring {
                                                    TradeInviteService inviteService,
                                                    InviteLink inviteLink,
                                                    TradeReviewService reviewService,
-                                                   TradeMaintenanceService maintenanceService) {
+                                                   TradeMaintenanceService maintenanceService,
+                                                   TradeNotifier notifier) {
         return new TradeCommandHandler(service, tierPolicy, pending, lookup, inviteService, inviteLink,
-                reviewService, maintenanceService);
+                reviewService, maintenanceService, notifier);
     }
 
     /** GM-17 自动回复（空规则表；上线后由管理端注册关键词）。 */
