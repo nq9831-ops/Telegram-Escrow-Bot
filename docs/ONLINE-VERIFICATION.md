@@ -25,6 +25,7 @@
 | A8 | `/escrow status` 生产回执 | 私聊发 `/escrow status 1` | 回订单号 + 状态摘要 + 下一步 | ⚠️ **部分验证**：同链路（dispatcher→handler）已由 A6 端到端证通，且本地 `TradeCommandHandlerTest` 覆盖三条 status 用例；但**生产回执未亲眼确认**（status 只读，DB 不留痕，用户未回报文） |
 | A9 | **对手方主动通知** | 甲私聊 bot 走 `/escrow confirm` → `/escrow lock`，乙（卖方）应在私聊收到通知；再让乙发 `/escrow deliver`，甲应收到 | 对方收到通知；**命令路径**在对方未与 bot 会话过时，发起方回执追加「对方可能收不到通知」；**Web 路径**（Mini App）同情形下只返回 `notified:false`、不产生文案（前端据此提示） | ☐ **未验**——通知路径已由 `TradeNotifierTest` / `TradeCommandHandlerTest` / 两个 Web 控制器测试覆盖，但真实 Telegram 发送无 token 无法验 |
 | A10 | **入群订阅门禁（GM-16/T60）** | 配置 `TGG_JOIN_REQUIRED_CHANNELS`（须落在 `TGG_JOIN_ALLOWED_CHANNELS` 白名单内），再让一个未订阅者入群 | 未订阅者被移出，且**群内回执是群视角**（「新成员因未订阅 X 已被移出」——不是对被移出者说话，他看不到）；已订阅者正常收到欢迎语；**查询失败时应既不踢也不欢迎**（回"无法确认"） | ☐ **未验**——门卫与适配器已由 `JoinSubscriptionGateTest` / `TelegramChannelMembershipAdapterTest` 覆盖，但真实 `getChatMember` 与真实踢人无 token 无法验 |
+| A11 | **入群爆发自动保护** | 配 `TGG_PROTECTION_MAX_JOINS`（如 5）与窗口/冷却，然后在群里连续拉超过该数量的人 | 超过上限后自动开启保护模式（后续入群者被移出）并给出可读原因；冷却期满且未再爆发则自动解除（惰性判定，无需调度器）；**未配置 max-joins（默认 0）时完全不检测** | ☐ **未验**——爆发判定与惰性解除已由 `JoinBurstGuardTest` 覆盖（并做过变异验证），链路已由 `TelegramBotHandlerTest.acceptanceJoinBurstProtectsGroup` 覆盖；但真实拉人、以及**冷却期自动恢复所需的真实时间流逝**，无 token 均无法验 |
 
 ## B. 依赖真实链（S5 合约 + C1 定案 + D 核实）
 
