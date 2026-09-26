@@ -40,7 +40,7 @@
 | 编号 | 功能 | 判定 | 证据（实测） |
 |---|---|---|---|
 | GM-01 | 踢出/封禁/解封 | C | `GroupAdminPort` + `TelegramGroupAdminAdapter` + `ModerationCommandHandler`；**"解封"未核实**（端口只见 kick/ban/mute/deleteMessage） |
-| GM-02 | 禁言/解除禁言（定时） | C | 端口 `mute` 可执行；**定时解除缺调度器**（`MuteSchedule` 为零引用孤儿且自述"由调度侧触发"） |
+| GM-02 | 禁言/解除禁言（定时） | C | 端口 `mute` 可执行；**解除属"真需定时"**（无人交互也要发生）。`MuteSchedule` **无生产调用点**（实测 main 引用 0，仅测试） |
 | GM-03 | 警告/清除警告（累计） | A | `WarningOrchestrator` + `WarningPolicy` + `WarningPort` + `ModerationCommandHandler`；权限缺口已修（入口 `requireAdmin`） |
 | GM-04 | 群主自主封禁（独立 API） | E | 未读到决定它的实现 |
 | GM-05 | 管理员配置（添加/移除） | B | `AdminRegistry` 存在但**零生产调用**；实际生效的是实时角色解析 `MemberRolePort`/`TelegramMemberRoleAdapter` |
@@ -51,11 +51,11 @@
 | GM-10 | 链接过滤（白名单+短链） | A | `LinkFilter` + `LinkMatch`（已修"空白名单误删带链接消息"） |
 | GM-11 | 媒体过滤（类型白名单） | A | `MediaFilter`（只对有 fileInfo 的消息判定） |
 | GM-12 | 频道傀儡攻击防御 | B | `ChannelPuppetGuard` 存在但零生产调用 |
-| GM-13 | 定期防钓鱼推送 | C | `PhishingNotice`；"定期"缺调度器 |
+| GM-13 | 定期防钓鱼推送 | C | `PhishingNotice` **无生产调用点**（实测 main 引用 0）——阻塞不是"定时"，是**没有触发它的流程** |
 | GM-14 | 欢迎新成员 | A | `WelcomeTemplate` + `MemberJoinHandler`，挂在入群路径 |
-| GM-15 | 入群验证（策略化+60s 超时踢出） | C | `JoinVerificationFlow`；**超时依赖调度器**；Mini App 交互在 `TradeApiController` 侧另有实现 |
+| GM-15 | 入群验证（策略化+60s 超时踢出） | C | `JoinVerificationFlow` 仅被 javadoc 提及（`SecondaryVerificationFlow:31`），**无真实调用**；60s 超时属"真需定时" |
 | GM-16 | 频道订阅前置验证 | A | `ChannelSubscriptionCheck` + `ChannelMembershipPort` + `JoinSubscriptionGate` + `TelegramChannelMembershipAdapter`（**本会话接线**；默认不启用） |
-| GM-17 | 定时任务 + 自动回复 | C | `KeywordAutoReply`；调度器缺 |
+| GM-17 | 定时任务 + 自动回复 | C | **自动回复已接线**（`BotDispatcher` 持有 `KeywordAutoReply`，实测真实字段注入）；"定时任务"部分属"真需定时"，按项目非目标降级 |
 | GM-18 | 静默模式（时段配置） | A | `SilenceWindow` + `NoticePolicy`（**本会话经 `TradeNotifier` 接线**） |
 | GM-19 | 功能开关（按群组） | B | `FeatureToggle` 零生产调用（其 fail-closed 对保护类功能是反向的，接线前须先定可选功能清单） |
 | GM-20 | 日志频道（操作推送） | D | 未找到实现类 |
@@ -71,7 +71,7 @@
 | GM-30 | 未成年人保护 | D | 未找到实现类（待决 B4） |
 | GM-31 | 权限系统（角色+校验） | A | `PermissionChecker` + `PermissionPolicy` + `MemberRole` + `CommandActor` + `MemberRolePort`（实时解析 creator/administrator） |
 | GM-32 | 三级限流（用户/群组/全局） | C | `RateLimiter` + `RateLimitPolicy` + `RateLimitDecision`；接入深度未核实 |
-| GM-33 | 日志脱敏（Token + 用户 ID） | C | `LogSanitizer`；**哈希无盐且仅 24bit（SPEC 6.2 缺陷未修）** |
+| GM-33 | 日志脱敏（Token + 用户 ID） | B | `LogSanitizer` **带盐方法已实现**（`maskUserId(long, String salt)` 盐必填 + 48 bit；旧无盐重载仅向后兼容）——但**生产侧无任何调用方**（实测 `grep 'maskUserId('` main 为空），即"有件未接"。**更正**：本行初稿沿用 SPEC 6.2 的"未加盐"说法而**未读源码**，实测已加盐（见 §5） |
 | GM-34 | 数据备份（MySQL + Redis） | D | 未找到实现类（属运维动作） |
 | GM-35 | 用户首次使用引导 | B | `JoinOnboarding` 零生产调用（缺"已引导过"的持久化） |
 | GM-36 | 通知三维度（可见范围/推送/留存） | A | `NoticePolicy` + `TradeEvent` + `TradeNotifier`（**本会话接线**；`EPHEMERAL` 维度未映射——当前事件全为 PERMANENT） |
@@ -118,7 +118,7 @@
 | ET-36 | 主动推送 | **A** | `TradeNotifier` + `TradeEvent` + `NotificationOutcome` + `NoticePolicy`（**本会话新增**；对手方通知，fail-soft） |
 | ET-37 | 交易信用可视化 | C | `CreditScore` + `TraderTier` |
 | ET-38 | 交易信用冷启动（新手标识） | C | `NewcomerBadge` |
-| ET-39 | 交易群生命周期（7 天归档） | C | `TradeGroupLifecycle`（归档依赖调度器） |
+| ET-39 | 交易群生命周期（7 天归档） | C | `TradeGroupLifecycle` **无生产调用点**（实测 main 引用 0）——阻塞是**缺"交易群"这条流程**，不是调度器 |
 | ET-40 | 交易群静默期 | C | `SilenceWindow` + `NoticePolicy` |
 | ET-41 | 群成员投票 | C | `MemberVote` + `VoterRegistry` + `VoteRewardAllocator` |
 | ET-42 | 投票人回避机制 | C | `VoterRecusal` |
@@ -136,7 +136,7 @@
 | ET-54 | 防钓鱼提示 | C | `PhishingNotice` |
 | ET-55 | Permit Signature 钓鱼防御 | C | SPEC 6.3 定为**不制造授权面**（设计层面的规避，非独立实现） |
 | ET-56 | 代理合约可升级性 | D | 未做（默认关闭，待决 C2） |
-| ET-57 | 预映像攻击防护（哈希前加盐） | C | `EvidenceHasher`/`LogSanitizer`；**加盐未做（SPEC 6.2）** |
+| ET-57 | 预映像攻击防护（哈希前加盐） | C | `LogSanitizer` 侧**已加盐**（见 GM-33）；`EvidenceHasher` 侧本次未核实——**不作断言** |
 | ET-58 | TON 异步消息顺序处理 | C | Java 侧守卫已有（`EscrowOrder` 前置条件）；合约侧待做 |
 | ET-59 | 资金流向链上验证 | C | `BalanceCrossVerifier`（无真实源） |
 | ET-60 | 争议双方陈述 | C | `DisputeStatementFlow` |
@@ -154,7 +154,7 @@
 | ET-73 | 账号异常检测 | C | `AnomalyDetector` |
 | ET-75 | 交易信用综合评分 | C | `CreditScore`（**待决 B3**：等级条件冲突等 5 点未澄清） |
 | ET-76 | 交易者等级评定 | C | `TraderTier` |
-| ET-77 | 周榜推送 | C | `Leaderboard` + `TradeNotifier`（推送通道已在；定时缺调度器） |
+| ET-77 | 周榜推送 | C | `Leaderboard` **无生产调用点**（实测 main 引用 0）；推送通道已在（`TradeNotifier`）。阻塞是**缺榜单聚合流程** + 周期触发 |
 | ET-78 | 月榜推送 | C | 同上 |
 | ET-79 | 季度荣誉榜 | C | `Leaderboard` |
 | ET-80 | 排名隐私控制 | C | `RankPrivacy` |
@@ -164,14 +164,33 @@
 | 判定 | 群管理 | 担保交易 | 合计 |
 |---|---|---|---|
 | **A｜已落地·已接线** | 13 | 17 | **30** |
-| **B｜已落地·未接线** | 4 | 1 | **5** |
-| **C｜部分实现** | 12 | 48 | **60** |
+| **B｜已落地·未接线** | 5 | 1 | **6** |
+| **C｜部分实现** | 11 | 48 | **59** |
 | **D｜未找到实现类** | 5 | 10 | **15** |
 | **E｜未核实** | 2 | 2 | **4** |
 | 合计 | 36 | 78 | **114** |
 
 > 本表由 `awk` 从上方逐项表实测汇总（`awk -F'|' '/^\| (GM|ET)-[0-9]+/{print $4}'`），不是手写估计——
 > 初稿我凭手感填过一次，与实测差得很大，已按实测更正。
+
+### 2.4 「缺调度器」诊断更正（2026-09-25 实测）
+
+本版初稿沿用了"缺调度器"当阻塞理由，**实测后判定这个诊断基本是错的**。逐类查生产调用点
+（`grep -rl <类> --include=*.java tgg-*/src/main`，排除自身与 javadoc 提及）：
+
+| 类 | main 引用 | 实情 |
+|---|---|---|
+| `KeywordAutoReply` | 2（`BotDispatcher:32/61` 真实字段注入） | **已接线** ✓ |
+| `TradeGroupLifecycle` / `MuteSchedule` / `Leaderboard` / `PhishingNotice` | **0** | 无生产调用点 |
+| `EvidenceDeadline` | 1（仅 `DisputeStatementFlow:44` 的 `{@link}`） | 无真实调用 |
+| `JoinVerificationFlow` | 1（仅 `SecondaryVerificationFlow:31` 的 `{@link}`） | 无真实调用 |
+
+**结论**：这些类的阻塞**不是缺调度器，而是没被接进任何流程**——所以"惰性化"这条替代路也走不通
+（没有触发点可挂）。真正的解锁条件是**上游流程成立**：交易群流程（ET-05/06/39/40）、
+证据流（ET-17/43/45）、榜单聚合（ET-75/76/77）。**唯一属"真需定时"的是**：
+禁言解除（GM-02）、60s 入群验证超时（GM-15）、周期推送（GM-13/ET-77~79）——这些按项目
+"不引入调度器"的非目标**降级或另议**，不应当作可开工项排进波次。
+
 
 ## 3. 支撑类（不占功能编号，实测存在）
 
@@ -185,7 +204,7 @@
 ## 4. 结论
 
 **一句**：逐项实测 114 行（GM 36 + ET 78；其中 GM-36 取 SPEC 6.6 节的定义，SPEC 状态表本身缺该行），
-**已落地 35 条（30 已接线 + 5 未接线）**、**部分实现 60 条**、未找到实现 15 条、未核实 4 条。
+**已落地 36 条（30 已接线 + 6 未接线）**、**部分实现 59 条**、未找到实现 15 条、未核实 4 条。
 与旧快照的"已落地 31 / 未做 84"相比，**不是功能变多了、而是判定标准变了**：旧版把"有类"就记 ✅（所以出现
 `SilenceWindow` 这类零引用孤儿被算作已完成），本版把"**是否接线、用户能否用到**"单独拆出来。
 
@@ -196,8 +215,11 @@
    这是当前**唯一**横跨大量 ET 项的结构性阻塞（ET-09/10/11/15/17/19/21/50/51/53/59 等）。
 
 **已知质量缺口（非规格缺项）**：
-- `LogSanitizer` 无盐哈希 + 仅 24bit（SPEC 6.2 要求加部署级盐值 + 加长输出）——**未修**；
-- `BannedWordMatcher` 逐词 `contains`（无 Trie，词表大时有压力）；
+- ~~`LogSanitizer` 无盐哈希 + 仅 24bit~~ —— **判定更正：此项不成立**。源码实测 `LogSanitizer` 已实现带盐方法
+  （`maskUserId(long, String salt)`，盐必填 + 48 bit）、`EvidenceHasher` 已实现 `saltedHash(...)`；
+  **真实缺口是"未接线"**（`LogSanitizer` 生产侧零调用，见 GM-33）。本项初稿照抄 SPEC 6.2 而未读源码，属我的误判；
+- `BannedWordMatcher` 逐词 `contains`（其 javadoc 自述"未实现 Trie"）——**此项属实**，且它已接线（`BotDispatcher:121`），
+  是纯性能项；
 - 五个"已落地未接线"的类（`AdminRegistry`/`ChannelPuppetGuard`/`FeatureToggle`/`JoinOnboarding`/`ReplayGuard`）——
   每个都卡在缺件上（详见 `.rivet/HANDOFF.md` 的记录），**不是补一行调用能收口的**。
 
