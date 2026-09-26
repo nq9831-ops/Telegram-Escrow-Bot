@@ -5,7 +5,7 @@
 > （编号冻结、去重、补漏、事实修正、冲突消解、设计补强、现状标注）。
 > 下列 `01`–`14` 为**分份溯源记录**；**任何冲突以 `SPEC.md` 为准**。
 >
-> 与代码实现状态对照见 `docs/FEATURE-ROADMAP.md`；实施编排见 `.rivet/plans/`。
+> 与代码实现状态对照见 `docs/CODE-VS-SPEC.md`（**权威**）；实施编排见 `.rivet/plans/` 与 `docs/superpowers/plans/2026-09-25-dev-plan.md`。
 
 ## 目录
 
@@ -33,7 +33,8 @@
 
 ## 相关文档（不在本目录）
 
-- `docs/FEATURE-ROADMAP.md` — 剩余功能的可开工规格 + 已落地对照
+- `docs/CODE-VS-SPEC.md` — **落地判定（权威）**：逐项实测 + 证据分级 A/B/C/D/E
+  （原 `docs/FEATURE-ROADMAP.md` 因编号体系过时已于 2026-09-25 删除，取回方式见 `docs/INDEX.md`）
 - `docs/UNDECIDABLE-DECISIONS.md` — 待用户拍板的事项（A 阻塞 / B 商业 / C 技术 / D 外部事实 / E 工作区）
 - `.rivet/plans/` — 实施计划（活动计划见 `v2-0-剩余功能续跑实施计划.md`）
 - `README.md` / `DISCLAIMER.md` / `LICENSE` — 项目门面与许可
@@ -46,7 +47,8 @@
 2. **结构化整理**：保留原文语义与编号，不擅自改写需求；措辞有歧义处标「(存疑)」。
 3. **冲突标注**：文中断言若与**当前源码**冲突（技术栈、版本、路径等），在文末「整理观察」里
    按「源码为准」指出，不静默采信文档。
-4. **影响传导**：若新文档改变了实施范围或优先级，同步更新 `FEATURE-ROADMAP.md` 与活动计划。
+4. **影响传导**：若新文档改变了实施范围或优先级，同步更新 `docs/CODE-VS-SPEC.md`（落地判定）
+   与 `docs/superpowers/plans/2026-09-25-dev-plan.md`（当前计划）。（原有的 `FEATURE-ROADMAP.md` 已失效。）
 5. **决策收敛**：新文档带出的、开发者不能单方面决定的事项，追加到 `UNDECIDABLE-DECISIONS.md`。
 
 ## 当前状态（2026-09-24）

@@ -22,8 +22,8 @@
 
 | 文档 | 为什么失效 |
 |---|---|
-| `docs/FEATURE-ROADMAP.md` | ① 用 **V2.0 的 G/T 编号**，与 SPEC 的 GM/ET **不是一套**（它自己开篇也标了版本警告）；② 基线是 193 测试；③ 它列"结构性缺口 S1/S2"与"可立刻开工波次"**均已完成**（S1 Bot 接线、S2 命令层、G-A/T-A/G-B 波次全部落地）。**保留仅作历史**。 |
-| `docs/superpowers/plans/2026-09-24-full-dev-plan.md` | 已被**完全消耗**：它的 Wave 1b/1c/1d 列出的 17 个类（`TradeGroupLifecycle`/`VoterRegistry`/`VoteStake`/`MemberVote`/`FallbackSettle`/`VoteRewardAllocator`/`EvidenceChannel`/`EvidenceDeadline`/`AmountTierPolicy`/`NewcomerBadge`/`CounterpartyDiversityScorer`/`ChannelPuppetGuard`/`PhishingNotice`/`NoticePolicy`/`JoinOnboarding`/`AnomalyDetector` 等）**实测全部已存在**；它列的 Wave 2（S1）/Wave 3（持久化）也已完成。 |
+| `docs/FEATURE-ROADMAP.md` | ① 用 **V2.0 的 G/T 编号**，与 SPEC 的 GM/ET **不是一套**（它自己开篇也标了版本警告）；② 基线是 193 测试；③ 它列"结构性缺口 S1/S2"与"可立刻开工波次"**均已完成**（S1 Bot 接线、S2 命令层、G-A/T-A/G-B 波次全部落地）。**保留仅作历史**。→ **已于 2026-09-25 删除**。取回：`git log --diff-filter=D -- docs/FEATURE-ROADMAP.md` 找删除提交，再 `git show <sha>^:docs/FEATURE-ROADMAP.md`。 |
+| `docs/superpowers/plans/2026-09-24-full-dev-plan.md` | 已被**完全消耗**：它的 Wave 1b/1c/1d 列出的 17 个类（`TradeGroupLifecycle`/`VoterRegistry`/`VoteStake`/`MemberVote`/`FallbackSettle`/`VoteRewardAllocator`/`EvidenceChannel`/`EvidenceDeadline`/`AmountTierPolicy`/`NewcomerBadge`/`CounterpartyDiversityScorer`/`ChannelPuppetGuard`/`PhishingNotice`/`NoticePolicy`/`JoinOnboarding`/`AnomalyDetector` 等）**实测全部已存在**；它列的 Wave 2（S1）/Wave 3（持久化）也已完成。→ **已于 2026-09-25 删除**。取回：`git log --diff-filter=D -- docs/superpowers/plans/2026-09-24-full-dev-plan.md` 找删除提交，再 `git show <sha>^:<该路径>`。 |
 | `SPEC.md` 第 4 节的状态列（✅/⬜） | 已加作废横幅：当时即漏标（ET-33/ET-34 标 ⬜ 而代码已落地），且口径把**零引用孤儿也算完成**。改用 `CODE-VS-SPEC.md`。 |
 | `.rivet/backups/**` | 工具自动备份（含各文档的历史版本），**不是资产**，不引用。 |
 
