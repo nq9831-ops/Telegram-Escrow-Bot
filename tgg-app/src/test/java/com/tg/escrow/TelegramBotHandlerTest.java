@@ -260,8 +260,30 @@ class TelegramBotHandlerTest {
         return new TelegramBotHandler(BotTokenConfig.from(k -> "123456:TESTTOKEN"), dispatcher,
                 reply, "mybot", webAppUrl,
                 (chatId, userId) -> com.tg.escrow.core.MemberRole.MEMBER,
-                new MemberJoinHandler(new com.tg.escrow.core.ProtectionMode(),
-                        new com.tg.escrow.core.WelcomeTemplate("欢迎 {username}")));
+                new JoinSubscriptionGate(
+                        new com.tg.escrow.core.ChannelSubscriptionCheck(java.util.Set.of()),
+                        (channel, userId) -> com.tg.escrow.core.ChannelMembershipPort.Membership.UNKNOWN,
+                        new com.tg.escrow.core.GroupAdminPort() {
+                            @Override
+                            public void kick(long guildId, long userId) {
+                            }
+
+                            @Override
+                            public void ban(long guildId, long userId) {
+                            }
+
+                            @Override
+                            public void mute(long guildId, long userId, java.time.Duration duration) {
+                            }
+
+                            @Override
+                            public void deleteMessage(long guildId, long messageId) {
+                            }
+                        },
+                        new MemberJoinHandler(new com.tg.escrow.core.ProtectionMode(),
+                                new com.tg.escrow.core.WelcomeTemplate("欢迎 {username}")),
+                        // 必订频道留空：本类测的是入群文案与保护模式，订阅门禁由 JoinSubscriptionGateTest 覆盖
+                        java.util.Set.of()));
     }
 
     private static Update textUpdate(long chatId, long userId, String text) {

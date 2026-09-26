@@ -24,6 +24,8 @@
 package com.tg.escrow;
 
 import com.tg.escrow.core.BannedWordRegistry;
+import com.tg.escrow.core.ChannelMembershipPort;
+import com.tg.escrow.core.ChannelSubscriptionCheck;
 import com.tg.escrow.core.GroupAdminPort;
 import com.tg.escrow.core.KeywordAutoReply;
 import com.tg.escrow.core.LinkFilter;
@@ -402,6 +404,33 @@ public class BotWiring {
                 guardService);
     }
 
+    /** 频道订阅白名单（GM-16：只允许必订白名单频道——必订非白名单项属配置错误，防傀儡频道）。 */
+    @Bean
+    public ChannelSubscriptionCheck channelSubscriptionCheck(
+            @Value("${tgg.join.allowed-channels:}") String allowedChannels) {
+        return new ChannelSubscriptionCheck(new java.util.LinkedHashSet<>(splitCsv(allowedChannels)));
+    }
+
+    /** 频道订阅查询端口（与角色查询共用同一个 TelegramClient）。 */
+    @Bean
+    public ChannelMembershipPort channelMembershipPort(TelegramClient client) {
+        return new TelegramChannelMembershipAdapter(client);
+    }
+
+    /**
+     * 入群订阅门卫（GM-16 / T60）：未订阅必订频道者踢出，通过者再走欢迎/保护模式。
+     *
+     * <p>必订频道清单为空即<b>不启用</b>（不查也不拦）——默认不打扰任何群。
+     */
+    @Bean
+    public JoinSubscriptionGate joinSubscriptionGate(
+            ChannelSubscriptionCheck check, ChannelMembershipPort membership, GroupAdminPort admin,
+            MemberJoinHandler memberJoinHandler,
+            @Value("${tgg.join.required-channels:}") String requiredChannels) {
+        return new JoinSubscriptionGate(check, membership, admin, memberJoinHandler,
+                new java.util.LinkedHashSet<>(splitCsv(requiredChannels)));
+    }
+
     @Bean
     public TelegramBotHandler telegramBotHandler(BotTokenConfig tokenConfig,
                                                  BotDispatcher dispatcher,
@@ -409,9 +438,9 @@ public class BotWiring {
                                                  @Value("${tgg.bot.username}") String botUsername,
                                                  @Value("${tgg.webapp.url:}") String webAppUrl,
                                                  MemberRolePort memberRolePort,
-                                                 MemberJoinHandler memberJoinHandler) {
+                                                 JoinSubscriptionGate joinGate) {
         return new TelegramBotHandler(tokenConfig, dispatcher, reply, botUsername, webAppUrl,
-                memberRolePort, memberJoinHandler);
+                memberRolePort, joinGate);
     }
 
     /**

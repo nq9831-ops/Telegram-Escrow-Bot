@@ -62,7 +62,7 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
     private final String botUsername;
     private final String webAppUrl;
     private final com.tg.escrow.core.MemberRolePort memberRolePort;
-    private final MemberJoinHandler memberJoinHandler;
+    private final JoinSubscriptionGate joinGate;
 
     /**
      * @param tokenConfig    token 配置（构造期已 fail-fast）
@@ -75,15 +75,15 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
     public TelegramBotHandler(BotTokenConfig tokenConfig, BotDispatcher dispatcher,
                              BotReplyPort reply, String botUsername, String webAppUrl,
                              com.tg.escrow.core.MemberRolePort memberRolePort,
-                             MemberJoinHandler memberJoinHandler) {
+                             JoinSubscriptionGate joinGate) {
         if (tokenConfig == null || dispatcher == null || reply == null) {
             throw new com.tg.escrow.common.TggException("Bot 接线：token/分发器/回复出口均不可为空");
         }
         if (memberRolePort == null) {
             throw new com.tg.escrow.common.TggException("Bot 接线：角色查询端口不可为空（缺它则处置权限判不了）");
         }
-        if (memberJoinHandler == null) {
-            throw new com.tg.escrow.common.TggException("Bot 接线：入群处理器不可为空（缺它则入群事件无人接）");
+        if (joinGate == null) {
+            throw new com.tg.escrow.common.TggException("Bot 接线：入群门卫不可为空（缺它则入群事件无人接）");
         }
         this.tokenConfig = tokenConfig;
         this.dispatcher = dispatcher;
@@ -91,7 +91,7 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
         this.botUsername = botUsername;
         this.webAppUrl = webAppUrl;
         this.memberRolePort = memberRolePort;
-        this.memberJoinHandler = memberJoinHandler;
+        this.joinGate = joinGate;
     }
 
     /** bot token（10.x 架构中 token 由注册方（TelegramBotsLongPollingApplication）持有，非接口方法）。 */
@@ -186,7 +186,7 @@ public final class TelegramBotHandler implements LongPollingSingleThreadUpdateCo
             if (Boolean.TRUE.equals(newMember.getIsBot())) {
                 continue;   // bot 自己入群也会出现在此列表，不必自我欢迎
             }
-            memberJoinHandler.onMemberJoined(new MemberJoined(
+            joinGate.onMemberJoined(new MemberJoined(
                             message.getChatId(), title, newMember.getId(), displayNameOf(newMember)))
                     .ifPresent(text -> reply.sendText(message.getChatId(), text));
         }

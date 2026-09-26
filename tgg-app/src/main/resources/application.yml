@@ -53,6 +53,12 @@ tgg:
     silence-start: ${TGG_NOTIFY_SILENCE_START:}
     silence-end: ${TGG_NOTIFY_SILENCE_END:}
     silence-zone: ${TGG_NOTIFY_SILENCE_ZONE:UTC}
+  join:
+    # 频道订阅前置验证（GM-16 / T60）：入群者须已订阅 required-channels，否则被踢出。
+    # required-channels 必须全部落在 allowed-channels 白名单内——不在白名单的必订项属配置错误
+    # （门卫会拒绝执行并留痕，绝不因此踢人）。required 留空 = 不启用（不查也不拦）。
+    required-channels: ${TGG_JOIN_REQUIRED_CHANNELS:}
+    allowed-channels: ${TGG_JOIN_ALLOWED_CHANNELS:}
 
 logging:
   level:
