@@ -23,6 +23,7 @@
 | A6 | **`/escrow cancel` 端到端** | 私聊发 `/escrow cancel 1` | 回执「已取消」且**库里 state 变 CANCELLED** | ✅ 2026-09-24 实测：`escrow_orders` id=1 → `state=CANCELLED`、`version=0→1`、`reason=当事人取消` |
 | A7 | **乐观锁在生产库生效** | 同上（观察 version 列） | 写入后 `version` 自增 | ✅ 2026-09-24：`version 0 → 1`（证明 `@Version` 在真库上工作） |
 | A8 | `/escrow status` 生产回执 | 私聊发 `/escrow status 1` | 回订单号 + 状态摘要 + 下一步 | ⚠️ **部分验证**：同链路（dispatcher→handler）已由 A6 端到端证通，且本地 `TradeCommandHandlerTest` 覆盖三条 status 用例；但**生产回执未亲眼确认**（status 只读，DB 不留痕，用户未回报文） |
+| A9 | **对手方主动通知** | 甲私聊 bot 走 `/escrow confirm` → `/escrow lock`，乙（卖方）应在私聊收到通知；再让乙发 `/escrow deliver`，甲应收到 | 对方收到通知；**若对方从未与 bot 会话过，发起方回执应追加「对方可能收不到通知」** | ☐ **未验**——通知路径已由 `TradeNotifierTest` / `TradeCommandHandlerTest` / 两个 Web 控制器测试以记录型出口覆盖，但**真实 Telegram 发送无 token 无法验**；Bot 能否主动私聊未会话过的用户亦未核实 |
 
 ## B. 依赖真实链（S5 合约 + C1 定案 + D 核实）
 
