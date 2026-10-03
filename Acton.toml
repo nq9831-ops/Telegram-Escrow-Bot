@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: AGPL-3.0-only
+# Copyright (C) 2026 telegram-escrow-bot contributors
+#
+# TON 托管合约（S5）的 Acton 工程配置。
+# 由 `acton init` 生成后手工校正：元数据对齐仓库实际，并补齐 [toolchain]/[test]。
+# 工具链：Acton v1.2.0（https://github.com/ton-blockchain/acton）。
+
+[package]
+name = "telegram-escrow-bot"
+description = "TON 托管合约（S5）—— 担保交易的链上部分（Tolk）"
+version = "0.1.0"
+license = "AGPL-3.0-only"
+
+[toolchain]
+acton = "1.2.0"
+
+[contracts.EscrowContract]
+display-name = "EscrowContract"
+src = "contracts/EscrowContract.tolk"
+depends = []
+
+[test]
+# .rivet/ 是开发工具目录（不进版本库），其中会有 *.test.tolk 的历史备份；
+# 不排除会被 acton test 当作待跑测试（实测：备份里旧版本导致假失败）。
+exclude = [".rivet/**"]
+
+[fmt]
+width = 100
+ignore = [".rivet/**"]
+
+[import-mappings]
+acton = ".acton"
+contracts = "contracts"
+gen = "gen"
+tests = "tests"
+wrappers = "wrappers"

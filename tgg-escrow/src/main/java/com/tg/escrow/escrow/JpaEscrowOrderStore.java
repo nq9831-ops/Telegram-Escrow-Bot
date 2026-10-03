@@ -1,0 +1,67 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 telegram-escrow-bot contributors
+ *
+ * This file is part of telegram-escrow-bot.
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License only.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * NOTE: the SPDX identifier is AGPL-3.0-only because the LICENSE file in this
+ * repository carries the plain AGPL v3 text without an "or later" grant. If you
+ * intend to allow later versions, change this line to AGPL-3.0-or-later and
+ * make the LICENSE wording match — the two must not disagree.
+ */
+package com.tg.escrow.escrow;
+
+import com.tg.escrow.common.EscrowException;
+
+import org.springframework.dao.OptimisticLockingFailureException;
+
+/**
+ * {@link EscrowOrderStore} 的 JPA 实现——落单到 {@code escrow_orders} 表。
+ *
+ * <p>守端口契约的两条：失败抛异常不静默返回，且绝不返回 {@code null}
+ * （落单结果未知时宁可让上层失败，也不谎报创建成功）。
+ */
+public final class JpaEscrowOrderStore implements EscrowOrderStore {
+
+    private final EscrowOrderRepository repository;
+
+    public JpaEscrowOrderStore(EscrowOrderRepository repository) {
+        if (repository == null) {
+            throw new EscrowException("订单存储：未提供仓储");
+        }
+        this.repository = repository;
+    }
+
+    @Override
+    public EscrowOrder save(EscrowOrder order) {
+        if (order == null) {
+            throw new EscrowException("订单存储：不得保存 null 订单");
+        }
+        EscrowOrder saved;
+        try {
+            saved = repository.save(order);
+        } catch (OptimisticLockingFailureException ex) {
+            // 乐观锁冲突：本次读到的版本已被他人改过。在适配器边界转译成领域异常——
+            // 技术异常不该流入领域层，且上层要能据此回"请重查"而非"操作非法"。
+            throw new ConcurrentOrderUpdateException(
+                    "订单已被他人变更（并发写入冲突），请重查后重试", ex);
+        }
+        if (saved == null) {
+            // Spring Data 正常不会返回 null；此处是契约防线——落单结果未知时不谎报成功
+            throw new EscrowException("订单存储：保存返回 null，落单结果未知");
+        }
+        return saved;
+    }
+}

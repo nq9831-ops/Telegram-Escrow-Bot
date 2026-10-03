@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.tg.escrow</groupId>
+    <artifactId>telegram-escrow-bot</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>tgg-federation</artifactId>
+  <name>tgg-federation</name>
+  <description>联邦仲裁与节点签名。escrow 的裁决签名（必含联邦）依赖本模块提供的节点密钥契约。（待实现）</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-common</artifactId>
+    </dependency>
+
+    <!-- 为什么需要 BouncyCastle：JDK 内置 Ed25519 支持只在 KeyPairGenerator 层面
+         （生成随机的），不提供「从 32 字节 seed 派生公钥」。而本模块要求密钥可确定性
+         恢复——配置里只存一个 seed，公钥由它算出，避免「私钥与公钥配置不一致」这类
+         在验签时才暴露的故障。BC 的 Ed25519PrivateKeyParameters.generatePublicKey()
+         补上了这一点。 -->
+    <dependency>
+      <groupId>org.bouncycastle</groupId>
+      <artifactId>bcprov-jdk18on</artifactId>
+      <version>1.86</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+</project>

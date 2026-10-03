@@ -1,0 +1,207 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 telegram-escrow-bot contributors
+ *
+ * This file is part of telegram-escrow-bot.
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License only.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * NOTE: the SPDX identifier is AGPL-3.0-only because the LICENSE file in this
+ * repository carries the plain AGPL v3 text without an "or later" grant. If you
+ * intend to allow later versions, change this line to AGPL-3.0-or-later and
+ * make the LICENSE wording match — the two must not disagree.
+ */
+package com.tg.escrow;
+
+import com.tg.escrow.common.TggException;
+import com.tg.escrow.core.NoticePolicy;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+import org.telegram.telegrambots.meta.api.methods.AnswerCallbackQuery;
+import org.telegram.telegrambots.meta.api.methods.send.SendMessage;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.InlineKeyboardMarkup;
+import org.telegram.telegrambots.meta.api.objects.replykeyboard.buttons.InlineKeyboardButton;
+import org.telegram.telegrambots.meta.exceptions.TelegramApiException;
+import org.telegram.telegrambots.meta.generics.TelegramClient;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+
+/**
+ * BotReplyPort 的 Telegram 适配器（S1）的行为固定测试。
+ *
+ * <p>用 mock 的 {@link TelegramClient}——该接口有 20+ 个重载方法，手写 fake 不现实；
+ * 本类要钉住的是「端口调用 → 正确的 Telegram 方法 + 正确字段」以及<b>失败不静默</b>。
+ */
+class TelegramBotReplyAdapterTest {
+
+    @Test
+    @DisplayName("sendText → execute(SendMessage)：chatId 十进制、text 原样")
+    void sendTextExecutesSendMessage() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        adapter.sendText(123456L, "已创建订单 #1");
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(client).execute(captor.capture());
+        assertThat(captor.getValue().getChatId()).isEqualTo("123456");
+        assertThat(captor.getValue().getText()).isEqualTo("已创建订单 #1");
+    }
+
+    @Test
+    @DisplayName("ackCallback → execute(AnswerCallbackQuery)：id 原样（不应答会让按钮一直转圈）")
+    void ackCallbackExecutesAnswerCallbackQuery() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        adapter.ackCallback("cb-42");
+
+        ArgumentCaptor<AnswerCallbackQuery> captor =
+                ArgumentCaptor.forClass(AnswerCallbackQuery.class);
+        verify(client).execute(captor.capture());
+        assertThat(captor.getValue().getCallbackQueryId()).isEqualTo("cb-42");
+    }
+
+    @Test
+    @DisplayName("sendTextWithButtons → execute(SendMessage)：每个按钮带 callback_data（点击即回调）")
+    void sendTextWithButtonsBuildsCallbackKeyboard() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        adapter.sendTextWithButtons(123456L, "订单 #3：待验收",
+                java.util.List.of(new BotReply.ActionButton("✅ 验收放款 #3", "rl:3"),
+                        new BotReply.ActionButton("💸 退款 #3", "rf:3")));
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(client).execute(captor.capture());
+        SendMessage sent = captor.getValue();
+        assertThat(sent.getChatId()).isEqualTo("123456");
+        assertThat(sent.getText()).isEqualTo("订单 #3：待验收");
+
+        InlineKeyboardMarkup markup = (InlineKeyboardMarkup) sent.getReplyMarkup();
+        java.util.List<InlineKeyboardButton> row = markup.getKeyboard().get(0);
+        assertThat(row).hasSize(2);
+        assertThat(row.get(0).getText()).isEqualTo("✅ 验收放款 #3");
+        assertThat(row.get(0).getCallbackData()).isEqualTo("rl:3");
+        assertThat(row.get(1).getCallbackData()).isEqualTo("rf:3");
+    }
+
+    @Test
+    @DisplayName("sendTextWithButtons：空按钮列表 → 抛（该走 sendText，不能发一条没有按钮的空键盘）")
+    void sendTextWithButtonsRejectsEmptyList() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        assertThatThrownBy(() -> adapter.sendTextWithButtons(1L, "x", java.util.List.of()))
+                .isInstanceOf(RuntimeException.class);
+        verify(client, never()).execute(any(SendMessage.class));
+    }
+
+    @Test
+    @DisplayName("sendTextWithWebApp → execute(SendMessage)：replyMarkup 为含 web_app 按钮的 inline 键盘")
+    void sendTextWithWebAppBuildsInlineButton() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        adapter.sendTextWithWebApp(123456L, "用法说明…", "📝 打开表单",
+                "https://example.test/miniapp/index.html");
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(client).execute(captor.capture());
+        SendMessage sent = captor.getValue();
+        assertThat(sent.getChatId()).isEqualTo("123456");
+        assertThat(sent.getText()).isEqualTo("用法说明…");
+        assertThat(sent.getReplyMarkup()).isInstanceOf(InlineKeyboardMarkup.class);
+
+        InlineKeyboardMarkup markup = (InlineKeyboardMarkup) sent.getReplyMarkup();
+        InlineKeyboardButton button = markup.getKeyboard().get(0).get(0);
+        assertThat(button.getText()).isEqualTo("📝 打开表单");
+        assertThat(button.getWebApp()).isNotNull();
+        assertThat(button.getWebApp().getUrl())
+                .isEqualTo("https://example.test/miniapp/index.html");
+    }
+
+    @Test
+    @DisplayName("sendTextWithWebApp：url 为空/空白 → 直接抛（不发出缺按钮的半成品）")
+    void webAppSendRequiresUrl() {
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(mock(TelegramClient.class));
+
+        assertThatThrownBy(() -> adapter.sendTextWithWebApp(1L, "x", "btn", ""))
+                .isInstanceOf(TggException.class);
+        assertThatThrownBy(() -> adapter.sendTextWithWebApp(1L, "x", "btn", null))
+                .isInstanceOf(TggException.class);
+    }
+
+    @Test
+    @DisplayName("发送失败 → 包装为 TggException 上抛（不静默吞）")
+    void sendFailureWrapped() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        doThrow(new TelegramApiException("boom")).when(client).execute(any(SendMessage.class));
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        assertThatThrownBy(() -> adapter.sendText(1L, "x")).isInstanceOf(TggException.class);
+    }
+
+    @Test
+    @DisplayName("应答失败 → 包装为 TggException 上抛（不掩盖）")
+    void ackFailureWrapped() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        doThrow(new TelegramApiException("boom")).when(client).execute(any(AnswerCallbackQuery.class));
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        assertThatThrownBy(() -> adapter.ackCallback("cb")).isInstanceOf(TggException.class);
+    }
+
+    @Test
+    @DisplayName("构造：client 为空 → 抛")
+    void ctorRejectsNull() {
+        assertThatThrownBy(() -> new TelegramBotReplyAdapter(null))
+                .isInstanceOf(TggException.class);
+    }
+
+    @Test
+    @DisplayName("sendText(policy)：silent 策略 → disableNotification=true（关响铃、不动送达）")
+    void silentPolicyDisablesNotification() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        adapter.sendText(123456L, "对方已交付，待你验收", NoticePolicy.progress());
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(client).execute(captor.capture());
+        assertThat(captor.getValue().getChatId()).isEqualTo("123456");
+        assertThat(captor.getValue().getText()).isEqualTo("对方已交付，待你验收");
+        assertThat(captor.getValue().getDisableNotification()).isTrue();
+    }
+
+    @Test
+    @DisplayName("sendText(policy)：critical 策略 → disableNotification=false（资金节点必须响铃）")
+    void criticalPolicyKeepsNotification() throws TelegramApiException {
+        TelegramClient client = mock(TelegramClient.class);
+        TelegramBotReplyAdapter adapter = new TelegramBotReplyAdapter(client);
+
+        adapter.sendText(123456L, "资金已锁定", NoticePolicy.critical());
+
+        ArgumentCaptor<SendMessage> captor = ArgumentCaptor.forClass(SendMessage.class);
+        verify(client).execute(captor.capture());
+        assertThat(captor.getValue().getDisableNotification()).isFalse();
+    }
+}

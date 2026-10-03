@@ -1,0 +1,73 @@
+# ── 私有目录：不进版本库 ─────────────────────────────
+/private/
+
+# ── 系统目录与工具生成文件：保留本地，永不入库 ────────
+/.rivet/
+/.rivet-config.json
+/.rivet.md
+/AGENTS.md
+
+# ── 构建产物 ────────────────────────────────────────
+target/
+build/
+out/
+bin/
+*.class
+*.jar
+*.war
+*.ear
+
+# ── 依赖 ────────────────────────────────────────────
+node_modules/
+dist/
+.npm/
+.yarn/
+
+# ── 环境变量、密钥与本地配置（重要：绝不提交）────────
+.env
+.env.*
+env.local
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+application-local.yml
+application-local.yaml
+application-prod.yml
+application-prod.yaml
+*-secret.yml
+
+# ── 日志 ────────────────────────────────────────────
+logs/
+*.log
+
+# ── IDE / 编辑器 ────────────────────────────────────
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+*.swp
+
+# ── 系统文件 ────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── 部署产物（可能含地址或凭据）─────────────────────
+deploy-output/
+
+# Acton related files
+.acton/
+# Acton localnet 的运行时产物（网络定义/容器数据/锁文件）——本地生成，不进仓库
+.acton-localnet/
+.studio/
+gen/
+lcov.info
+libraries.toml
+global.libraries.toml
+
+# Mnemonic and wallet files
+*.mnemonic
+wallets.toml
+global.wallets.toml

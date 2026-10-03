@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.tg.escrow</groupId>
+    <artifactId>telegram-escrow-bot</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>tgg-chain</artifactId>
+  <name>tgg-chain</name>
+  <description>链上部分：TON 合约与链上事件接入（新增模块，待实现）。
+    合约侧状态刻意少于应用层——合约只管资金（UNFUNDED / FUNDED / SETTLED_*），
+    流程（维护期、投票、争议）留在应用层，使合约攻击面最小且流程改动不需重新部署。</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-common</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+
+    <!--
+      TON 官方 Java SDK（TON 基金会 org `ton-blockchain`）。
+      取**模块件**而非聚合件 `org.ton.ton4j:ton4j`——聚合件在 Maven Central 未发布（实测 404），
+      模块件 `org.ton.ton4j:smartcontract` 可取（实测 200，同轮对照 junit/slf4j 均 200）。
+      版本来源：Maven Central 的 maven-metadata.xml（权威列表，最新 2.1.0）。
+      ⚠️ 许可：ton4j 为 **GPL-3.0**，与本仓库 AGPL-3.0 兼容（GPLv3 可并入 AGPLv3 作品），
+      但引入它即意味着将来无法改回宽松许可——见 docs/UNDECIDABLE-DECISIONS.md 的 A0-5/A0-6。
+    -->
+    <dependency>
+      <groupId>org.ton.ton4j</groupId>
+      <artifactId>smartcontract</artifactId>
+      <version>2.1.0</version>
+    </dependency>
+
+    <!--
+      纯 Java 的 ADNL lite-client（`org.ton.ton4j:adnl`）——它与 Tonlib 是 ton4j 里两条独立的
+      provider 路线：Tonlib 通过 JNA 加载原生 `libtonlibjson`（线上受限容器实测加载失败：
+      `IllegalArgumentException: Invalid library name ""`），adnl 则全 Java 实现，免原生化。
+      ⚠️ adnl **不在** smartcontract 的传递依赖里（tonlib 的 pom 将其标为 optional），必须显式声明。
+    -->
+    <dependency>
+      <groupId>org.ton.ton4j</groupId>
+      <artifactId>adnl</artifactId>
+      <version>2.1.0</version>
+    </dependency>
+
+    <!--
+      ton4j mnemonic（助记词 → ed25519 seed 派生）——写链钱包的便捷输入（2026-10-02）：
+      acton 原生导出的是助记词（`acton wallet export-mnemonic`），本模块把它转成
+      `AdnlChainSender` 需要的 32 字节 seed。同为 ton4j 模块件——显式声明（同 adnl/tweetnacl 的坑）。
+    -->
+    <dependency>
+      <groupId>org.ton.ton4j</groupId>
+      <artifactId>mnemonic</artifactId>
+      <version>2.1.0</version>
+    </dependency>
+
+    <!--
+      tweetnacl-java（com.iwebpp.crypto.TweetNaClFast）——ton4j smartcontract 的钱包组装
+      （WalletV5.createDataCell 等）在运行期用它做密钥对，但它**不在** smartcontract 的
+      传递依赖里（同类 optional 标法，同 adnl 的坑）：不显式声明则 import 直接解析不了，
+      而增量编译会把「找不到符号」糊成可加载的错误占位 class，测试期才炸 NoClassDefFoundError。
+    -->
+    <dependency>
+      <groupId>org.purejava</groupId>
+      <artifactId>tweetnacl-java</artifactId>
+      <version>1.1.2</version>
+    </dependency>
+
+    <!--
+      ton4j(Tonlib) 的**运行期**依赖，但不在它的传递依赖里 —— 编译期用不到，
+      所以此前构建全绿；一旦真正调用 Tonlib 就会 NoClassDefFoundError。
+      实测证据：线上 fat jar 解包后 libs/ 中没有任何 gson（`ls libs | grep -i gson` 为空），
+      而在服务器上跑最小探针立即报 `NoClassDefFoundError: com/google/gson/ToNumberStrategy`。
+      版本交给 Spring Boot BOM 管理（此处不写版本）。
+    -->
+    <dependency>
+      <groupId>com.google.code.gson</groupId>
+      <artifactId>gson</artifactId>
+      <!-- 编译期也用（2026-10-02 起）：AdnlChainSender 用 Gson 解析内置 testnet 全局配置
+           （ton-testnet.global.config.json）——不再每次写链都连 GitHub 拉配置。 -->
+    </dependency>
+  </dependencies>
+</project>

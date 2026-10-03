@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>com.tg.escrow</groupId>
+    <artifactId>telegram-escrow-bot</artifactId>
+    <version>0.1.0-SNAPSHOT</version>
+  </parent>
+
+  <artifactId>tgg-app</artifactId>
+  <name>tgg-app</name>
+  <description>应用装配与启动。唯一产出可执行 jar 的模块。</description>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-core</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-federation</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-escrow</artifactId>
+    </dependency>
+    <dependency>
+      <groupId>com.tg.escrow</groupId>
+      <artifactId>tgg-chain</artifactId>
+    </dependency>
+
+    <!-- 启动上下文所需：@SpringBootApplication 的自动装配与内嵌容器 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter</artifactId>
+    </dependency>
+
+    <!-- Telegram Bot 接入（S1）：版本与根 pom 注释锁定的 10.3.0 一致——
+         Boot 4.x 的 Jackson 3 与本库的 Jackson 2 注解不兼容（Update 反序列化静默失败），
+         故根 pom 锁 Boot 3.5.16，勿升 4.x。 -->
+    <dependency>
+      <groupId>org.telegram</groupId>
+      <artifactId>telegrambots-longpolling</artifactId>
+      <version>10.3.0</version>
+    </dependency>
+
+    <!-- Telegram 发消息客户端（S1）：TelegramClient 接口的实现（OkHttpTelegramClient）。
+         longpolling 只负责「收」，发消息必须用 client——它不在 longpolling 的传递依赖里
+         （longpolling 只传递 meta/okhttp/lombok），漏了它 BotReplyPort 就没有实现可用。 -->
+    <dependency>
+      <groupId>org.telegram</groupId>
+      <artifactId>telegrambots-client</artifactId>
+      <version>10.3.0</version>
+    </dependency>
+
+    <!-- Admin API（S6）：违禁词在线管理等后台端点。 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!--
+      应用层鉴权（安全门禁）：保护 `/admin/**`，不再只靠部署侧 Nginx 的 deny all。
+      ⚠️ 引入它即改变默认行为——Spring Security 默认保护**所有**端点，因此 SecurityConfig
+      必须显式放行 Mini App 的 `/api/**`（那里靠 initData 验签，认证发生在业务层而非本层）
+      与静态页，否则 Mini App 会被 401 挡住。那条放行是刻意配置，不是遗漏。
+    -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <!-- 只有本模块打可执行 jar；其余模块是普通库 jar。 -->
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <mainClass>com.tg.escrow.EscrowBotApplication</mainClass>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>

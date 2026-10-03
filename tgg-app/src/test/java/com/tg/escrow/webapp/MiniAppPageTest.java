@@ -1,0 +1,139 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 telegram-escrow-bot contributors
+ *
+ * This file is part of telegram-escrow-bot.
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License only.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * NOTE: the SPDX identifier is AGPL-3.0-only because the LICENSE file in this
+ * repository carries the plain AGPL v3 text without an "or later" grant. If you
+ * intend to allow later versions, change this line to AGPL-3.0-or-later and
+ * make the LICENSE wording match — the two must not disagree.
+ */
+package com.tg.escrow.webapp;
+
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Test;
+
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+/**
+ * Mini App 前端页（{@code static/miniapp/index.html}）的存在性与契约标记测试。
+ *
+ * <h2>为什么静态页也要测</h2>
+ * <p>页面由 Spring 以静态资源直接服务，没有编译期保障——被误删、改了脚本引址或
+ * 把身份来源换成 {@code initDataUnsafe}，都<b>不会让构建变红</b>，只会在线上静默失效。
+ * 本测试把"页面必须满足的几条硬契约"钉进构建：
+ * <ol>
+ *   <li>随 jar 打包（classpath 下确实存在）；</li>
+ *   <li>加载 Telegram 官方 SDK；</li>
+ *   <li>提交到 {@code /api/trade/create}；</li>
+ *   <li>身份取自 {@code tg.initData} 原始串，且<b>绝不</b>用 {@code initDataUnsafe}
+ *       （后者未经验签，等于把身份判断交给客户端）。</li>
+ * </ol>
+ */
+class MiniAppPageTest {
+
+    private static final String PAGE = "/static/miniapp/index.html";
+
+    private static String page() throws IOException {
+        try (InputStream in = MiniAppPageTest.class.getResourceAsStream(PAGE)) {
+            assertThat(in)
+                    .as("Mini App 页面必须随 jar 打包（classpath:%s）", PAGE)
+                    .isNotNull();
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
+    }
+
+    @Test
+    @DisplayName("页面在 classpath 下，且引了 Telegram SDK 与两个邀请 API 路径")
+    void pagePacksTelegramSdkAndApiPath() throws IOException {
+        String html = page();
+        assertThat(html).contains("telegram.org/js/telegram-web-app.js");
+        assertThat(html).contains("/api/trade/invite");
+        assertThat(html).contains("/api/trade/accept");
+    }
+
+    @Test
+    @DisplayName("身份来自 initData 原始串，且绝不用 initDataUnsafe（安全回归守卫）")
+    void identityComesFromSignedInitDataOnly() throws IOException {
+        String html = page();
+        assertThat(html).contains("tg.initData");
+        assertThat(html)
+                .as("initDataUnsafe 未经验签，出现在页面里即等于把身份判断交给客户端")
+                .doesNotContain("initDataUnsafe");
+    }
+
+    @Test
+    @DisplayName("提交体不含 userId 字段（身份只能来自服务端验签）")
+    void payloadHasNoUserIdField() throws IOException {
+        String html = page();
+        assertThat(html).contains("initData:");
+        assertThat(html).doesNotContain("userId");
+    }
+
+    @Test
+    @DisplayName("币种下拉只保留白名单 TON / USDT（Wave 0：其余币种不再出现在页面）")
+    void currencyOptionsAreWhitelisted() throws IOException {
+        String html = page();
+        assertThat(html).contains("<option value=\"TON\"");
+        assertThat(html).contains("<option value=\"USDT\"");
+        assertThat(html)
+                .as("白名单外的币种不应再出现在页面（服务端亦 fail-closed 拒绝）")
+                .doesNotContain("BTC", "ETH", "USDC");
+    }
+
+    @Test
+    @DisplayName("双模式：邀请令牌从 tg.initData 解析（受签名保护），绝不碰 initDataUnsafe")
+    void startParamParsedFromSignedInitData() throws IOException {
+        String html = page();
+        assertThat(html).contains("start_param");
+        assertThat(html).contains("tg.initData");
+        assertThat(html)
+                .as("未签名的令牌来源一旦出现，等于把『接哪条邀请』交给客户端")
+                .doesNotContain("initDataUnsafe");
+    }
+
+    @Test
+    @DisplayName("TON Connect 资金区元素与 SDK 引用齐备（Wave 3）")
+    void tonConnectBlockIsPresent() throws IOException {
+        String html = page();
+        assertThat(html).contains("tonconnect-ui.min.js");
+        assertThat(html).contains("id=\"escrowView\"");
+        assertThat(html).contains("id=\"connectWalletBtn\"");
+        assertThat(html).contains("data-action=\"FUND\"");
+        assertThat(html).contains("data-action=\"DISPUTE\"");
+        assertThat(html).contains("/api/escrow/chain-tx");
+        assertThat(html).contains("/api/escrow/wallet");
+        assertThat(html)
+                .as("动作按钮按 order-actions 预检过滤（角色 × 终态 × 部署）")
+                .contains("/api/escrow/order-actions");
+        assertThat(html).contains("tonconnect-manifest.json");
+    }
+
+    @Test
+    @DisplayName("TON Connect SDK 版本钉住（禁止 @latest 漂移）+ 邀请状态入口引用（遗留修复）")
+    void tonConnectPinnedAndInviteStatusPresent() throws IOException {
+        String html = page();
+        assertThat(html).contains("@tonconnect/ui@3.0.2");
+        assertThat(html)
+                .as("CDN 走 @latest 会在无预警下换行为——必须钉版本")
+                .doesNotContain("@tonconnect/ui@latest");
+        assertThat(html).contains("/api/trade/invite-status");
+    }
+}

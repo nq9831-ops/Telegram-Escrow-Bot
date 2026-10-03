@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>担保交易</title>
+  <!-- Telegram 官方 Mini App SDK：必须 HTTPS 加载，提供 window.Telegram.WebApp -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <!-- TON Connect UI（官方 SDK）：连接钱包并发起用户签名的链上交易 -->
+  <script src="https://unpkg.com/@tonconnect/ui@3.0.2/dist/tonconnect-ui.min.js"></script>
+  <style>
+    :root {
+      --bg: #ffffff;
+      --text: #000000;
+      --hint: #707579;
+      --btn: #2481cc;
+      --btn-text: #ffffff;
+      --secondary-bg: #f4f4f5;
+      --danger: #c0392b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      padding: 16px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", "Microsoft YaHei", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+    h1 { font-size: 18px; margin: 4px 0 16px; }
+    label { display: block; font-size: 14px; margin: 12px 0 4px; color: var(--hint); }
+    input, select {
+      width: 100%;
+      padding: 12px;
+      font-size: 16px;
+      border: 1px solid var(--secondary-bg);
+      border-radius: 10px;
+      background: var(--secondary-bg);
+      color: var(--text);
+    }
+    #risk {
+      margin: 16px 0 8px;
+      padding: 12px;
+      border-radius: 10px;
+      background: var(--secondary-bg);
+      font-size: 13px;
+      line-height: 1.5;
+      color: var(--hint);
+    }
+    #risk.strong { color: var(--danger); font-weight: 600; }
+    button {
+      width: 100%;
+      padding: 14px;
+      margin-top: 12px;
+      font-size: 16px;
+      font-weight: 600;
+      border: none;
+      border-radius: 10px;
+      background: var(--btn);
+      color: var(--btn-text);
+    }
+    button:disabled { opacity: .5; }
+    #result { margin-top: 16px; font-size: 14px; line-height: 1.5; white-space: pre-wrap; }
+    #result.ok { color: #2e7d32; }
+    #result.err { color: var(--danger); }
+    #walletStatus.err { color: var(--danger); }
+    #linkBox {
+      margin-top: 12px;
+      padding: 12px;
+      border-radius: 10px;
+      background: var(--secondary-bg);
+      font-size: 13px;
+      line-height: 1.6;
+      word-break: break-all;
+      color: var(--text);
+    }
+    #inviteLink { color: var(--btn); }
+  </style>
+</head>
+<body>
+  <h1 id="title">发起担保交易</h1>
+
+  <!-- 邀请视图（无 start_param）：本页作为「发起人」，填金额+币种生成转发链接 -->
+  <section id="inviteView" hidden>
+    <label for="amount">金额</label>
+    <input id="amount" name="amount" type="text" inputmode="decimal" placeholder="例如 100">
+
+    <label for="currency">币种</label>
+    <select id="currency" name="currency">
+      <!-- 币种白名单（Wave 0）：只结算 TON 与 TON 链上的 USDT；value 须与服务端 TradeCurrency 一致 -->
+      <option value="TON">TON</option>
+      <option value="USDT">USDT（TON 链）</option>
+    </select>
+
+    <div id="risk"></div>
+    <button id="inviteBtn" type="button">生成邀请链接</button>
+  </section>
+
+  <!-- 接受视图（有 start_param）：本页作为「对方」，确认即成为该单卖方 -->
+  <section id="acceptView" hidden>
+    <p id="acceptHint">你被邀请接受一笔担保交易。确认后你将成为本单卖方，发起人随后托管资金。</p>
+    <button id="acceptBtn" type="button">确认接受</button>
+  </section>
+
+  <!-- 资金操作（Wave 3：TON Connect）——接受成功后出现；身份仍来自 tg.initData 验签 -->
+  <section id="escrowView" hidden>
+    <div id="walletStatus" role="status" aria-live="polite" style="font-size:13px;color:var(--hint);margin:12px 0 4px;">未连接钱包</div>
+    <button id="connectWalletBtn" type="button">💳 连接钱包（TON Connect）</button>
+    <div id="actionsBox" hidden>
+      <button type="button" data-action="FUND">支付入金（买方）</button>
+      <button type="button" data-action="DELIVER">确认交付（卖方）</button>
+      <button type="button" data-action="CONFIRM">确认收货（买方）</button>
+      <button type="button" data-action="DISPUTE">发起争议（任一方）</button>
+      <button type="button" data-action="REFUND">请求退款（任一方）</button>
+    </div>
+    <!-- 无可执行链上动作时的说明（未部署 / 已结束）——由 order-actions 预检驱动 -->
+    <div id="actionsHint" style="font-size:13px;color:var(--hint);margin-top:8px;" hidden></div>
+    <!-- 危险链上动作的页面级二次确认：确认前不发起任何请求（见脚本） -->
+    <div id="confirmBox" hidden style="margin-top:12px;padding:10px 12px;border:1px solid #e0a800;border-radius:10px;background:rgba(255,193,7,.12);">
+      <div id="confirmText" style="font-size:14px;line-height:1.5;"></div>
+      <div style="font-size:12px;color:var(--hint);line-height:1.5;margin:4px 0 8px;">
+        链上操作不可撤销。确认后才会调起钱包签名，请在签名前核对金额与接收地址。
+      </div>
+      <button id="confirmYesBtn" type="button" style="margin-top:0;">确认执行</button>
+      <button id="confirmNoBtn" type="button" style="margin-top:8px;background:var(--secondary-bg);color:var(--text);">取消</button>
+    </div>
+  </section>
+
+  <div id="result" role="status" aria-live="polite"></div>
+
+  <div id="linkBox" hidden>
+    <div>把下面链接发给对方，对方点开即自动接单：</div>
+    <div id="inviteLink"></div>
+  </div>
+
+  <script>
+    (function () {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      var out = document.getElementById('result');
+      if (!tg) {
+        out.className = 'err';
+        out.textContent = '请在 Telegram 内打开本页面。';
+        return;
+      }
+      tg.ready();
+      tg.expand();
+
+      // 跟随 Telegram 主题（themeParams 为十六进制颜色）
+      var p = tg.themeParams || {};
+      var root = document.documentElement.style;
+      if (p.bg_color) root.setProperty('--bg', p.bg_color);
+      if (p.text_color) root.setProperty('--text', p.text_color);
+      if (p.hint_color) root.setProperty('--hint', p.hint_color);
+      if (p.button_color) root.setProperty('--btn', p.button_color);
+      if (p.button_text_color) root.setProperty('--btn-text', p.button_text_color);
+      if (p.secondary_bg_color) root.setProperty('--secondary-bg', p.secondary_bg_color);
+
+      // BackButton → 关闭
+      if (tg.BackButton) {
+        tg.BackButton.show();
+        tg.BackButton.onClick(function () { tg.close(); });
+      }
+
+      /**
+       * 从 tg.initData 原始串里取 start_param（令牌）。
+       * 只用于「该显示哪个视图」这一 UI 判断；权威判定在服务端重新验签后做出。
+       * 刻意不读未签名的客户端字段——令牌必须来自带签名保护的原始串。
+       */
+      function startParamFromInitData() {
+        var raw = tg.initData || '';
+        var parts = raw.split('&');
+        for (var i = 0; i < parts.length; i++) {
+          var eq = parts[i].indexOf('=');
+          if (eq > 0 && parts[i].substring(0, eq) === 'start_param') {
+            var v = parts[i].substring(eq + 1);
+            try { return decodeURIComponent(v); } catch (e) { return v; }
+          }
+        }
+        return null;
+      }
+
+      function post(url, payload) {
+        return fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        }).then(function (r) { return r.json().catch(function () { return null; }); });
+      }
+
+      /** 金额去尾零（"100.00000000" → "100"）——与服务端 MoneyFormat 同口径；纯字符串处理，不转数字。 */
+      function trimZeros(v) {
+        var s = String(v == null ? '' : v);
+        return s.indexOf('.') >= 0 ? s.replace(/0+$/, '').replace(/\.$/, '') : s;
+      }
+
+      /** ISO 时刻 → 浏览器本地时区展示；解析失败原样返回（不显示 Invalid Date）。 */
+      function localTime(iso) {
+        if (!iso) { return ''; }
+        var d = new Date(iso);
+        return isNaN(d.getTime()) ? String(iso) : d.toLocaleString();
+      }
+
+      var inviteView = document.getElementById('inviteView');
+      var acceptView = document.getElementById('acceptView');
+      var token = startParamFromInitData();
+
+      if (token) {
+        // 有令牌 → 先查状态：已接受则直接进资金区（免撞二次 accept 的 409）；
+        // PENDING/EXPIRED/查询失败 → 进接受视图（原流程）。身份仍由服务端验签。
+        document.getElementById('title').textContent = '接受担保交易邀请';
+        post('/api/trade/invite-status', { initData: tg.initData, token: token })
+          .then(function (st) {
+            if (st && st.ok && st.state === 'ACCEPTED' && st.orderId) {
+              document.getElementById('title').textContent = '担保交易（已接受）';
+              out.className = 'ok';
+              out.textContent = '订单 #' + st.orderId + '（' + trimZeros(st.amount) + ' ' + st.currency + '）';
+              showEscrowView(st.orderId);
+            } else {
+              acceptView.hidden = false;
+            }
+          })
+          .catch(function () { acceptView.hidden = false; });
+      } else {
+        inviteView.hidden = false;
+        document.getElementById('risk').textContent =
+          '提交前请确认：金额与币种。生成链接后发给对方，对方点开即接单。';
+      }
+
+      document.getElementById('inviteBtn').addEventListener('click', function () {
+        var amount = document.getElementById('amount').value.trim();
+        var currency = document.getElementById('currency').value;
+        if (!amount) {
+          out.className = 'err';
+          out.textContent = '请填写金额。';
+          return;
+        }
+        out.textContent = '';
+        out.className = '';
+        var btn = document.getElementById('inviteBtn');
+        btn.disabled = true;
+        btn.textContent = '生成中…';
+
+        // 身份只来自 Telegram 签发的原始串；请求体里没有用户 ID 字段
+        post('/api/trade/invite', { initData: tg.initData, amount: amount, currency: currency })
+          .then(function (body) {
+            if (body && body.ok) {
+              out.className = 'ok';
+              out.textContent = '已生成邀请（' + trimZeros(body.amount) + ' ' + body.currency
+                + '）。有效期至 ' + localTime(body.expiresAt) + '。';
+              document.getElementById('inviteLink').textContent = body.inviteUrl;
+              document.getElementById('linkBox').hidden = false;
+              if (body.riskPrompt) {
+                var r = document.getElementById('risk');
+                r.textContent = '风险提示：' + body.riskPrompt;
+                r.className = 'strong';
+              }
+            } else {
+              out.className = 'err';
+              out.textContent = (body && body.error) ? body.error : '生成失败，请稍后重试。';
+            }
+          })
+          .catch(function () {
+            out.className = 'err';
+            out.textContent = '网络异常，请稍后重试。';
+          })
+          .finally(function () {
+            btn.disabled = false;
+            btn.textContent = '生成邀请链接';
+          });
+      });
+
+      document.getElementById('acceptBtn').addEventListener('click', function () {
+        out.textContent = '';
+        out.className = '';
+        var btn = document.getElementById('acceptBtn');
+        btn.disabled = true;
+        btn.textContent = '提交中…';
+
+        // 令牌在签名串的 start_param 里，无需也不应单独传
+        post('/api/trade/accept', { initData: tg.initData })
+          .then(function (body) {
+            if (body && body.ok) {
+              out.className = 'ok';
+              out.textContent = '已接受，订单 #' + body.orderId + '（' + trimZeros(body.amount) + ' ' + body.currency + '）'
+                + '\n请连接钱包以完成链上资金操作。';
+              showEscrowView(body.orderId);
+            } else {
+              out.className = 'err';
+              out.textContent = (body && body.error) ? body.error : '接受失败，请稍后重试。';
+            }
+          })
+          .catch(function () {
+            out.className = 'err';
+            out.textContent = '网络异常，请稍后重试。';
+          })
+          .finally(function () {
+            btn.disabled = false;
+            btn.textContent = '确认接受';
+          });
+      });
+
+      // ── TON Connect 资金链（Wave 3）────────────────────────────────
+      // 连接后调 /api/escrow/wallet 绑定地址；操作按钮调 /api/escrow/chain-tx
+      // 取回交易参数，交用户钱包签名广播——后端从不接触用户私钥。
+      var escrowView = document.getElementById('escrowView');
+      var tonConnectUI = null;
+      var connectedAddress = null;
+      var currentOrderId = null;
+
+      // ── 连接状态机（连接中 / 已取消 / 失败都有反馈）─────────────────────
+      // 与 web 端同口径（@tonconnect/ui 3.0.2）：openModal() 在弹窗打开时即 resolve，
+      // 不代表连接成功；连接结果经 onStatusChange、错误经其第二参 errorsHandler、
+      // 弹窗关闭经 onModalStateChange —— 'action-cancelled' 是用户主动关掉弹窗，
+      // 'wallet-selected' 是已选钱包（连接交给钱包侧，仍在进行中，不当失败）。
+      var walletStatus = document.getElementById('walletStatus');
+      var connectWalletBtn = document.getElementById('connectWalletBtn');
+      var walletPhase = 'idle';
+
+      function setWalletPhase(phase, detail) {
+        walletPhase = phase;
+        connectWalletBtn.disabled = (phase === 'connecting');
+        connectWalletBtn.textContent = (phase === 'connecting')
+          ? '连接中…'
+          : '💳 连接钱包（TON Connect）';
+        if (phase === 'connecting') {
+          walletStatus.textContent = '正在连接钱包…请在 TON Connect 弹窗中完成授权。';
+          walletStatus.className = '';
+        } else if (phase === 'connected') {
+          walletStatus.textContent = '已连接：' + (connectedAddress || '');
+          walletStatus.className = '';
+        } else if (phase === 'cancelled') {
+          walletStatus.textContent = detail || '已取消连接钱包——可重试。';
+          walletStatus.className = '';
+        } else if (phase === 'error') {
+          walletStatus.textContent = '连接失败：' + (detail || '未知原因');
+          walletStatus.className = 'err';
+        } else {
+          walletStatus.textContent = '未连接钱包';
+          walletStatus.className = '';
+        }
+      }
+      setWalletPhase('idle'); // 初始同步一次：状态行文案与状态机同源，避免与 HTML 静态文案分叉
+
+      // ── 动作按钮过滤（order-actions 预检：角色 × 终态 × 部署）──────────────
+      // 拉取失败时保持"全部可见"（渐进增强）：网络抖动不该让按钮消失，
+      // 点错仍有服务端可读拒绝兜底。
+      var actionsInfo = null;   // null = 尚未取到（不过滤）
+
+      function showEscrowView(orderId) {
+        currentOrderId = orderId;
+        escrowView.hidden = false;
+        ensureTonConnect();
+        refreshActions(orderId);
+      }
+
+      function refreshActions(orderId) {
+        post('/api/escrow/order-actions', { initData: tg.initData, orderId: orderId })
+          .then(function (b) {
+            if (b && b.ok) {
+              actionsInfo = b;
+              applyActionsVisibility();
+            }
+          })
+          .catch(function () { /* 保持不过滤 */ });
+      }
+
+      function applyActionsVisibility() {
+        if (!actionsInfo) { return; }
+        var actions = actionsInfo.actions || [];
+        var anyVisible = false;
+        Array.prototype.forEach.call(
+          document.querySelectorAll('#actionsBox button[data-action]'),
+          function (btn) {
+            var ok = actions.indexOf(btn.getAttribute('data-action')) >= 0;
+            btn.hidden = !ok;
+            if (ok) { anyVisible = true; }
+          });
+        var hint = document.getElementById('actionsHint');
+        if (anyVisible) {
+          hint.hidden = true;
+        } else if (actionsInfo.deployed === false) {
+          hint.textContent = '订单尚未部署链上合约——暂无可执行的链上操作。';
+          hint.hidden = false;
+        } else {
+          hint.textContent = '交易已结束，无链上操作。';
+          hint.hidden = false;
+        }
+      }
+
+      function ensureTonConnect() {
+        if (tonConnectUI) return tonConnectUI;
+        if (!window.TON_CONNECT_UI) {
+          setWalletPhase('error', 'TON Connect SDK 未加载（请检查网络后重开）。');
+          out.className = 'err';
+          out.textContent = 'TON Connect SDK 未加载（请检查网络后重开）。';
+          return null;
+        }
+        tonConnectUI = new window.TON_CONNECT_UI.TonConnectUI({
+          manifestUrl: location.origin + '/api/escrow/tonconnect-manifest.json'
+        });
+        tonConnectUI.onStatusChange(function (wallet) {
+          if (wallet && wallet.account && wallet.account.address) {
+            connectedAddress = wallet.account.address;
+            setWalletPhase('connected');
+            document.getElementById('actionsBox').hidden = false;
+            applyActionsVisibility();
+            if (currentOrderId) {
+              post('/api/escrow/wallet', {
+                initData: tg.initData, orderId: currentOrderId, address: connectedAddress
+              }).then(function (b) {
+                if (!b || !b.ok) {
+                  out.className = 'err';
+                  out.textContent = (b && b.error) ? b.error : '钱包绑定失败。';
+                }
+              });
+            }
+          } else {
+            connectedAddress = null;
+            document.getElementById('actionsBox').hidden = true;
+            if (walletPhase !== 'error') { setWalletPhase('idle'); }
+          }
+        }, function (err) {
+          // SDK 侧连接错误不再静默：状态行给出失败原因
+          setWalletPhase('error', (err && err.message) ? err.message : 'TON Connect 连接失败。');
+        });
+
+        tonConnectUI.onModalStateChange(function (state) {
+          if (state.status === 'opened') {
+            if (walletPhase !== 'connecting') { setWalletPhase('connecting'); }
+          } else if (state.status === 'closed' && !tonConnectUI.connected
+              && walletPhase === 'connecting' && state.closeReason === 'action-cancelled') {
+            setWalletPhase('cancelled', '已取消连接钱包——可重试。');
+          }
+        });
+        return tonConnectUI;
+      }
+
+      document.getElementById('connectWalletBtn').addEventListener('click', function () {
+        var ui = ensureTonConnect();
+        if (!ui || ui.connected) { return; }
+        setWalletPhase('connecting');
+        var opened = ui.openModal();
+        if (opened && opened.catch) {
+          opened.catch(function (e) {
+            setWalletPhase('error', (e && e.message) ? e.message : '无法打开 TON Connect 弹窗。');
+          });
+        }
+      });
+
+      // ── 危险链上动作的页面级二次确认（第一道）────────────────────────
+      // 单击动作按钮只进入「待确认」态，不发起任何请求；点「确认执行」才走
+      // confirmPendingAction。与 TON Connect 钱包签名弹窗（第二道）并列而非重复：
+      // 前者确认「执行哪个动作」，在网络请求之前的页面层拦住误触；
+      // 后者授权「这笔交易的参数」，在请求之后出现。
+      var confirmBox = document.getElementById('confirmBox');
+      var confirmText = document.getElementById('confirmText');
+      var pendingActionBtn = null;
+
+      function requestAction(btn) {
+        if (!connectedAddress || !currentOrderId) {
+          out.className = 'err';
+          out.textContent = '请先连接钱包并查询订单。';
+          return;
+        }
+        out.textContent = '';
+        out.className = '';
+        pendingActionBtn = btn;
+        confirmText.textContent = '确认对订单 #' + currentOrderId + ' 执行「'
+          + btn.textContent.trim() + '」？';
+        confirmBox.hidden = false;
+      }
+
+      function cancelPendingAction() {
+        pendingActionBtn = null;
+        confirmBox.hidden = true;
+      }
+
+      function confirmPendingAction() {
+        var btn = pendingActionBtn;
+        if (!btn) { return; }
+        var action = btn.getAttribute('data-action');
+        cancelPendingAction();
+        // 先清旧结果再进签名：签名期间页面显示进度，不残留上一条回执
+        out.className = '';
+        out.textContent = '正在准备交易参数…';
+        btn.disabled = true;
+        post('/api/escrow/chain-tx', {
+          initData: tg.initData, orderId: currentOrderId, action: action
+        }).then(function (body) {
+          if (!body || !body.ok) {
+            throw new Error((body && body.error) ? body.error : '构造交易失败。');
+          }
+          var ui = ensureTonConnect();
+          if (!ui) { throw new Error('TON Connect SDK 未加载（请检查网络后重开）。'); }
+          out.textContent = '等待钱包签名——请在钱包中核对金额与接收地址后确认。';
+          return ui.sendTransaction({
+            validUntil: body.validUntil,
+            network: body.network,
+            messages: [{
+              address: body.address, amount: body.amount, payload: body.payload
+            }]
+          });
+        }).then(function () {
+          out.className = 'ok';
+          out.textContent = '已提交到钱包签名。链上确认后订单状态将更新。';
+        }).catch(function (e) {
+          out.className = 'err';
+          out.textContent = (e && e.message) ? e.message : '操作失败。';
+        }).finally(function () { btn.disabled = false; });
+      }
+
+      Array.prototype.forEach.call(
+        document.querySelectorAll('#actionsBox button[data-action]'),
+        function (btn) {
+          btn.addEventListener('click', function () { requestAction(btn); });
+        });
+
+      document.getElementById('confirmYesBtn').addEventListener('click', confirmPendingAction);
+      document.getElementById('confirmNoBtn').addEventListener('click', cancelPendingAction);
+    })();
+  </script>
+</body>
+</html>

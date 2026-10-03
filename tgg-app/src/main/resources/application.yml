@@ -1,0 +1,182 @@
+spring:
+  application:
+    name: telegram-escrow-bot
+
+  datasource:
+    # 生产值经环境变量注入（与参考项目的纪律一致：密钥不硬编码，缺失即 fail-fast）。
+    url: jdbc:mysql://${TGG_DB_HOST:localhost}:${TGG_DB_PORT:3306}/${TGG_DB_NAME:tgg_escrow}?useUnicode=true&characterEncoding=utf8&serverTimezone=UTC
+    username: ${TGG_DB_USER:root}
+    password: ${TGG_DB_PASSWORD:}
+
+  jpa:
+    # validate：数据库结构由 Flyway 管理，实体不许自行建表/改表。
+    # 结构漂移在启动期即失败，而不是运行到某条 SQL 才炸。
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+# Bot 与交易链参数（部署者按需覆盖；此处默认值仅为示例，不构成建议）。
+# token 刻意不在此处——只从环境变量 TELEGRAM_BOT_TOKEN 读（BotTokenConfig），避免凭证进仓库。
+tgg:
+  # 本部署**允许受理**的币种（逗号分隔；大小写与空白归一）。
+  # **留空 = 不收窄**：TON 与 USDT 都受理（行为与从前一致）。只想受理 USDT 就写 `USDT`。
+  # 写成能力白名单之外的币种（如 `BTC`）在**启动期**直接抛——配置错误 fail-fast，不静默丢弃。
+  # 与 TradeCurrency 的分工：那个枚举回答「能不能」（平台能力事实），本项回答「允许什么」（部署选择）。
+  allowed-currencies: ${TGG_ALLOWED_CURRENCIES:}
+  bot:
+    # 本 bot 用户名（不含 @）：命令解析（/cmd@botname 归属判定）与邀请深链需要它。
+    # **必备键**——未配置（留空）时启动直接失败（InviteLink 构造期抛错并点名本键），
+    # 不会静默生成指向别的 bot 的深链。环境变量：TELEGRAM_BOT_USERNAME。
+    username: ${TELEGRAM_BOT_USERNAME:}
+  admin:
+    # 后台端点（/admin/**）的访问凭据，由 SecurityConfig 消费（HTTP Basic）。
+    # **留空 = 不提供任何账号** → /admin/** 一律 401（fail-closed），而不是放行。
+    # 它是应用层的第二道门；第一道是部署侧 Nginx 的 location ^~ /admin/ { deny all; }。
+    username: ${TGG_ADMIN_USERNAME:}
+    password: ${TGG_ADMIN_PASSWORD:}
+  chain:
+    # 链上能力开关。jetton-master 留空 = 链上能力未启用（不建 provider bean，不影响启动）。
+    # 配了就必须是可用的 TON 地址（非空、形态合法、非全零）——否则构造期抛、启动即失败。
+    # 它是「信任锚点」的来源：由它推导出的 ownJettonWallet 会写进合约 storage，
+    # 写错不会报错、只会静默收不到入金（见 contracts/types.tolk 的 EscrowExtra 注释）。
+    jetton-master: ${TGG_CHAIN_JETTON_MASTER:}
+    # true = 测试网（默认）；false = 主网。
+    testnet: ${TGG_CHAIN_TESTNET:true}
+    upgrade:
+      # 写链钱包私钥来源——**二选一**（都配 = 启动失败【歧义不猜】；都不配 = 写链栈未接线，
+      # 升级/部署/裁决出款/链上存证四类方法恒抛「未接线」，不假装可发）：
+      #   ① 助记词（acton `wallet new` / `export-mnemonic` 的原生产物；程序内派生 seed）——
+      wallet-mnemonic: ${TGG_CHAIN_UPGRADE_WALLET_MNEMONIC:}
+      #   ② 32 字节 ed25519 seed 的 Base64。
+      # 两者都是私钥材料：只走环境变量、不要写进文件；解析失败的报错只说形态/长度，不回显内容。
+      wallet-seed-base64: ${TGG_CHAIN_UPGRADE_WALLET_SEED:}
+      # 联邦钱包 v5r1 的 wallet id——**必须与钱包实际一致**，否则钱包拒收外部消息
+      # （表现为「交易被拒」，极易误诊为签名载荷口径问题——排查时先排除这一项，见 ONLINE-VERIFICATION B8）。
+      # 官方公式（ChainWalletKeys.v5r1WalletId，与 @ton/ton/acton 三方对拍）：
+      #   wallet_id = networkGlobalId XOR ([1][workchain:8][versionByte:8][subwallet:15])
+      # 标准默认（subwallet 0、workchain 0）：testnet = 2147483645、mainnet = 2147483409。
+      # 核销前自检：用 ChainWalletKeys.v5r1WalletAddress 推导地址，与 acton/钱包客户端显示的地址对拍。
+      wallet-id: ${TGG_CHAIN_UPGRADE_WALLET_ID:2147483645}
+  trade:
+    concurrent-max: ${TGG_TRADE_CONCURRENT_MAX:1}
+    cooldown: ${TGG_TRADE_COOLDOWN:PT0S}
+    tier:
+      normal-max: ${TGG_TIER_NORMAL_MAX:100}
+      confirm-max: ${TGG_TIER_CONFIRM_MAX:1000}
+  pending:
+    ttl: ${TGG_PENDING_TTL:PT10M}
+  confirm:
+    # 动作确认槽（release/refund 二次确认）的窗口：用户「发起动作 → 点确认」之间槽位的存活时长，
+    # 过期即失效、不再放行（需重新发起）。格式 ISO-8601 Duration。
+    # 与 pending.ttl **语义不同、不可混用**——后者管 create→confirm 的**建单预览**（两步建单流），
+    # 本键管已发起的**危险动作待确认**（两步确认流）；误配会让两个窗口相互覆盖。
+    window: ${TGG_CONFIRM_WINDOW:PT5M}
+  trade-group:
+    # 交易群静默期天数（ET-39/40）：订单终态后群进入静默，期满后下一次群内交互惰性归档。
+    silence-days: ${TGG_TRADE_GROUP_SILENCE_DAYS:7}
+  dispute:
+    # 证据提交窗口（ET-45）：争议发起后此时长内可举证，过期视为放弃。
+    # **该窗口不随维护期倒计时暂停**（业务冲突 2.3）——故只有"多久"可配、"能否暂停"不可配。
+    # 格式 ISO-8601 Duration；默认 PT24H = 24 小时（SPEC「争议发起后 24h 内提交」）。
+    evidence-window: ${TGG_DISPUTE_EVIDENCE_WINDOW:PT24H}
+    # 裁决前置门（ET-60）：true 时要求"争议双方各一条完整陈述且互认已读"才允许裁决。
+    # 默认 false——不改变既有 /admin/verdict 裁决路径的行为（陈述是公平的加分项，不是既有流程的阻断）。
+    require-statements: ${TGG_DISPUTE_REQUIRE_STATEMENTS:false}
+  fee:
+    # 费率（ET-29/30 · B1 拍板）：比例小数（0.02 = 2%），**默认 0 = 不收费**——
+    # 让「忘记配置」表现为没收费，而不是收错费。
+    # 三费分离（对外文案依据：平台费 ≠ 仲裁费）：
+    #   platform-rate    —— 放款时从流转金额扣（平台费）；
+    #   arbitration-rate —— 裁决时扣（仲裁费），名义由败诉方承担；
+    #   federation-share —— 联邦管理费占**仲裁费**的比例（不是占平台费）。
+    # 空值/未配置 = 0（同 allowed-currencies 的「留空=默认」惯例）；
+    # 非法值（负数 / ≥1 / 非数字）启动期抛——配置错误 fail-fast。
+    platform-rate: ${TGG_FEE_PLATFORM_RATE:0}
+    arbitration-rate: ${TGG_FEE_ARBITRATION_RATE:0}
+    federation-share: ${TGG_FEE_FEDERATION_SHARE:0}
+    # 首单豁免（ET-35 · B2 拍板：免首单手续费）：默认 true——卖方首笔成功交易免平台费。
+    # 只作用于平台费（仲裁费口径不受影响；三费分离）；运营方要收首单费时置 false。
+    first-order-free: ${TGG_FEE_FIRST_ORDER_FREE:true}
+  credit:
+    # 五维权重（④ 差距 1，逗号分隔 5 值）：顺序 = 完成数 / 争议率(反向) / 好评率 / 对手多样性(反向) / 活跃时长。
+    # **留空 = 默认口径 0.30,0.25,0.20,0.15,0.10**（既有行为零漂移）。
+    # 非法值（项数≠5、项越界 [0,1]、**总和≠1**）启动期抛——分数系统性偏移比缺配置更危险，fail-fast。
+    weights: ${TGG_CREDIT_WEIGHTS:}
+    # 轻量时间衰减（④ 差距 2）：格式「宽限天数,步长天数,每步因子,下限」。
+    # **留空 = 不衰减**（既有评分零漂移）；示例 365,180,0.9,0.3 = 一年内活跃过不衰减，
+    # 此后每 180 天乘 0.9、不低于 0.3。衰减只作用于「活跃时长」维度，且因子会写进拆解文案。
+    decay: ${TGG_CREDIT_DECAY:}
+    # 周榜惰性推送（④ 差距 4，ET-77）：无调度器，靠群内交互触发，每周每群最多一条。
+    # 默认 true；置 false 则完全不推（bean 仍在，只是恒静默）。私聊永不推送。
+    weekly-push: ${TGG_CREDIT_WEEKLY_PUSH:true}
+    # 周榜条数（与 /escrow rank 的默认 10 条同口径）。
+    weekly-push-size: ${TGG_CREDIT_WEEKLY_PUSH_SIZE:10}
+  risk:
+    # 入群风险评分（GM-24/25）。**weights 留空 = 不启用**（不建评分器，行为同从前）。
+    # 权重表形如 NO_USERNAME=30,NEW_ACCOUNT=30；未知因子名/非法分值启动期抛。
+    weights: ${TGG_RISK_WEIGHTS:}
+    new-account-days: ${TGG_RISK_NEW_ACCOUNT_DAYS:7}
+    # 逗号分隔语言白名单（如 en,zh）；留空 = 不检查语言。
+    allowed-languages: ${TGG_RISK_ALLOWED_LANGUAGES:}
+    # 三档阈值（达到即算）：REVIEW → 留痕+可选私下投管理员；REJECT → 移出。
+    review-threshold: ${TGG_RISK_REVIEW_THRESHOLD:20}
+    reject-threshold: ${TGG_RISK_REJECT_THRESHOLD:50}
+    # REVIEW 档私下投递的管理会话 ID；**留空 = 不启用**（只留痕，不假装已通知）。
+    review-notify-chat: ${TGG_RISK_REVIEW_NOTIFY_CHAT:}
+  invite:
+    # 邀请有效期：对方须在此期限内点开链接接单，否则失效（惰性过期校验）
+    ttl: ${TGG_INVITE_TTL:PT24H}
+  webapp:
+    # Mini App 表单页地址（必须 HTTPS——Telegram 硬性要求）。留空则「用法/帮助」回执退化为
+    # 纯文本、不带「打开表单」按钮。
+    url: ${TGG_WEBAPP_URL:}
+    initdata:
+      # initData 验签允许的最大时延（防重放）
+      max-age: ${TGG_WEBAPP_INITDATA_MAX_AGE:PT1H}
+  notify:
+    # 静默时段（G19）：只压制「待对方行动」类通知的响铃；资金/争议类一概响铃，且
+    # disable_notification 只关响铃、不影响送达。留空 = 不启用（不做静默判定）。
+    # 跨午夜写法：silence-start=22:00 && silence-end=02:00
+    silence-start: ${TGG_NOTIFY_SILENCE_START:}
+    silence-end: ${TGG_NOTIFY_SILENCE_END:}
+    silence-zone: ${TGG_NOTIFY_SILENCE_ZONE:UTC}
+  log:
+    # 用户 ID 日志脱敏的部署级盐（G24 / GM-33）。配了就按固定盐脱敏——同一用户跨重启仍可关联；
+    # 留空则改用进程级随机盐：不可预计算反推，但重启后同一用户的日志标识会变。
+    # 生产建议配置固定值，且不要与其它部署共用。
+    salt: ${TGG_LOG_SALT:}
+  # ⚠ join / protection 段已随群管理整体移除（2026-10-03）——以下键无代码消费者，保留供迁移期参考：
+  join:
+    # 频道订阅前置验证（GM-16 / T60）：入群者须已订阅 required-channels，否则被踢出。
+    # required-channels 必须全部落在 allowed-channels 白名单内——不在白名单的必订项属配置错误
+    # （门卫会拒绝执行并留痕，绝不因此踢人）。required 留空 = 不启用（不查也不拦）。
+    required-channels: ${TGG_JOIN_REQUIRED_CHANNELS:}
+    allowed-channels: ${TGG_JOIN_ALLOWED_CHANNELS:}
+  protection:
+    # 启动时是否直接开启保护模式（开启后新入群者会被移出）。默认 false。
+    enabled: ${TGG_PROTECTION_ENABLED:false}
+    # 入群爆发保护：窗口内入群数「严格超过」max-joins 次即自动开启保护模式，
+    # 冷却期满且未再爆发则自动解除（惰性判定，无需调度器）。max-joins 留 0 = 不检测。
+    window: ${TGG_PROTECTION_WINDOW:PT1M}
+    max-joins: ${TGG_PROTECTION_MAX_JOINS:0}
+    cooldown: ${TGG_PROTECTION_COOLDOWN:PT10M}
+  guard:
+    # 重复消息检测（GM-08）：同一内容在窗口内出现达到 threshold 次即判刷屏（语义为「达到即算」）。
+    # threshold 留 0 = 不启用（默认不改行为）；1 无意义（每条都会被算作重复），同样按未启用处理。
+    repeat:
+      window: ${TGG_GUARD_REPEAT_WINDOW:PT1M}
+      threshold: ${TGG_GUARD_REPEAT_THRESHOLD:0}
+    # ⚠ 频道傀儡防御（GM-12）已随群管理整体移除（2026-10-03）——本 guard 段（含上方 repeat）已无代码消费者，
+    # 保留供迁移期参考（含 TGG_GUARD_ALLOWED_CHANNELS：未设=不启用 / 空串=全拦 / 名单=放行）。
+
+logging:
+  level:
+    root: INFO

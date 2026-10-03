@@ -1,0 +1,26 @@
+{
+  "name": "tgg-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Telegram 群管理 + 担保交易系统 · Web 前端（Vue 3）——工程结构与实现约束见 README.md",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "@tonconnect/ui": "^3.0.2",
+    "vue": "^3.5.43"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.9",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.2",
+    "vitest": "^5.0.3",
+    "vue-tsc": "^3.3.12"
+  }
+}

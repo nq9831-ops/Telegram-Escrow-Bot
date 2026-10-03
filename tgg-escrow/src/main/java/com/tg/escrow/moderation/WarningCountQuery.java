@@ -1,0 +1,34 @@
+/*
+ * SPDX-License-Identifier: AGPL-3.0-only
+ * Copyright (C) 2026 telegram-escrow-bot contributors
+ *
+ * This file is part of telegram-escrow-bot.
+ *
+ * This program is free software: you can redistribute it and/or modify it under
+ * the terms of the GNU Affero General Public License as published by the Free
+ * Software Foundation, version 3 of the License only.
+ *
+ * This program is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+ * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
+ * details.
+ *
+ * You should have received a copy of the GNU Affero General Public License along
+ * with this program. If not, see <https://www.gnu.org/licenses/>.
+ *
+ * NOTE: the SPDX identifier is AGPL-3.0-only because the LICENSE file in this
+ * repository carries the plain AGPL v3 text without an "or later" grant. If you
+ * intend to allow later versions, change this line to AGPL-3.0-or-later and
+ * make the LICENSE wording match — the two must not disagree.
+ */
+package com.tg.escrow.moderation;
+
+/**
+ * 警告计数查询端口（ET-61 惩罚入参）。口径：按用户<b>跨群累加</b>（warnings 表按群×用户记账，
+ * 惩罚判据说的是"这个人"）——改口径只改这一处。
+ */
+public interface WarningCountQuery {
+
+    /** 某用户在所有群的累计警告数；无记录为 0。 */
+    int warnCountOf(long userId);
+}
