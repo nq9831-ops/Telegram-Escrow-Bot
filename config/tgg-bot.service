@@ -1,0 +1,26 @@
+# ============================================================================
+# systemd unit 模板：telegram-escrow-bot
+# ----------------------------------------------------------------------------
+# 安装步骤（部署教程 §7 有完整说明）：
+#   1) 拷贝到 /etc/systemd/system/tgg-bot.service（按需改名）
+#   2) 按实际路径修改 ExecStart / PIDFile / WorkingDirectory
+#   3) systemctl daemon-reload && systemctl enable --now tgg-bot
+# 说明：
+#   - Type=forking：run-app.sh 会 fork java 到后台并写 PID 文件
+#   - Restart=always：崩溃自动拉起（另有 keepalive cron 兜底，可选）
+# ============================================================================
+[Unit]
+Description=Telegram Escrow Bot (tgg-app)
+After=network.target mysql.service
+
+[Service]
+Type=forking
+WorkingDirectory=/opt/tgg
+ExecStart=/opt/tgg/run-app.sh
+PIDFile=/opt/tgg/run/tgg-bot.pid
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
